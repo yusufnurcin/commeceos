@@ -1,221 +1,214 @@
-import { fetchOperationsCenter, type OperationsCenterPayload } from "@/lib/runtime-api";
+"use client";
 
-export const dynamic = "force-dynamic";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
-const navItems = [
-  ["operations", "Operasyon"],
-  ["tenants", "Tenant"],
-  ["events", "Realtime"],
-  ["bridges", "Bridge"],
-  ["audit", "Audit"],
-  ["ai", "AI Ops"]
-] as const;
+type JsonRecord = Record<string, unknown>;
 
-function countOf(value: readonly unknown[] | undefined) {
-  return value?.length ?? 0;
+interface DashboardPayload {
+  readonly status: string;
+  readonly me?: {
+    readonly principal?: {
+      readonly name?: string | null;
+      readonly email?: string | null;
+      readonly roles?: readonly string[];
+      readonly workspaceId?: string;
+      readonly tenantId?: string;
+    };
+    readonly session?: {
+      readonly status?: string;
+      readonly sessionId?: string;
+    };
+  };
+  readonly healthMatrix?: {
+    readonly status?: string;
+    readonly entries?: readonly {
+      readonly service?: string;
+      readonly layer?: string;
+      readonly status?: string;
+      readonly latencyMs?: number;
+    }[];
+  };
+  readonly medusaHealth?: JsonRecord;
+  readonly tenants?: { readonly tenants?: readonly JsonRecord[] };
+  readonly queue?: { readonly queueStates?: readonly JsonRecord[]; readonly deadLetters?: readonly JsonRecord[] };
+  readonly audit?: { readonly events?: readonly JsonRecord[] };
 }
 
-function EmptyState({ payload }: { readonly payload: OperationsCenterPayload }) {
-  const empty = payload.emptyState?.premiumEmptyState;
-  if (!empty) {
-    return null;
+function EmptyOperationalState({ title, detail }: { readonly title: string; readonly detail: string }) {
+  return (
+    <div className="empty-state">
+      <strong>{title}</strong>
+      <p>{detail}</p>
+    </div>
+  );
+}
+
+function serviceStatus(payload: DashboardPayload, service: string) {
+  return payload.healthMatrix?.entries?.find((entry) => entry.service === service);
+}
+
+export default function CentralAdminPage() {
+  const router = useRouter();
+  const [payload, setPayload] = useState<DashboardPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    fetch("/api/runtime/dashboard", { cache: "no-store" })
+      .then(async (response) => {
+        if (response.status === 401) {
+          router.replace("/login");
+          return null;
+        }
+        const body = (await response.json()) as DashboardPayload;
+        if (!response.ok) {
+          throw new Error(body.status || "runtime_error");
+        }
+        return body;
+      })
+      .then((body) => {
+        if (mounted && body) {
+          setPayload(body);
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (mounted) {
+          setError(requestError instanceof Error ? requestError.message : "runtime_error");
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
+
+  const statusRows = useMemo(() => {
+    if (!payload) {
+      return [];
+    }
+    return ["gateway-api", "medusa", "odoo", "realtime", "postgres", "redis", "minio", "meilisearch"].map((service) => ({
+      service,
+      entry: serviceStatus(payload, service)
+    }));
+  }, [payload]);
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
   }
 
-  return (
-    <section className="empty-ops" aria-label="Operasyonel boş durum">
-      <p className="eyebrow">{payload.emptyState?.resource}</p>
-      <h2>{empty.title}</h2>
-      <p>{empty.message}</p>
-      <span>{empty.action}</span>
-    </section>
-  );
-}
+  if (loading) {
+    return <main className="centered-runtime">Runtime oturumu doğrulanıyor</main>;
+  }
 
-function MetricStrip({ payload }: { readonly payload: OperationsCenterPayload }) {
-  const center = payload.operationsCenter;
-  const metrics = [
-    ["Tenant", countOf(center?.tenantTopologyMap)],
-    ["Workspace", countOf(center?.workspaceRegistry)],
-    ["Queue State", countOf(center?.queueMonitoring)],
-    ["Audit Event", countOf(center?.auditCenter)],
-    ["AI Signal", countOf(center?.aiOperationsCenter?.signals)]
-  ] as const;
+  if (error || !payload) {
+    return (
+      <main className="centered-runtime">
+        <EmptyOperationalState title="Runtime erişimi kurulamadı" detail={error ?? "Gateway yanıtı alınamadı."} />
+      </main>
+    );
+  }
+
+  const principal = payload.me?.principal;
+  const tenantCount = payload.tenants?.tenants?.length ?? 0;
+  const queueCount = payload.queue?.queueStates?.length ?? 0;
+  const auditCount = payload.audit?.events?.length ?? 0;
 
   return (
-    <section className="metric-strip" aria-label="Gerçek runtime özetleri">
-      {metrics.map(([label, value]) => (
-        <article className="metric-cell" key={label}>
-          <span>{label}</span>
-          <strong>{value}</strong>
-        </article>
-      ))}
-    </section>
-  );
-}
-
-export default async function CentralAdminPage() {
-  const payload = await fetchOperationsCenter();
-  const center = payload.operationsCenter;
-  const odooOperations = center?.orchestrationCenter?.odoo ?? [];
-  const medusaOperations = center?.orchestrationCenter?.medusa ?? [];
-
-  return (
-    <main className="control-shell">
-      <aside className="workspace-rail" aria-label="Global Operations Center">
-        <div className="brand-lockup">
-          <div className="brand-mark" aria-hidden="true">
-            ZC
-          </div>
+    <main className="app-shell">
+      <aside className="side-rail">
+        <div className="brand-panel">
+          <div className="brand-mark-large">ZC</div>
           <div>
-            <p>Zyber Cart</p>
             <strong>Commerce OS</strong>
+            <span>Central Admin</span>
           </div>
         </div>
-
-        <nav className="adaptive-nav" aria-label="Operasyon navigasyonu">
-          {navItems.map(([id, label]) => (
-            <a href={`#${id}`} key={id}>
-              {label}
-            </a>
-          ))}
+        <nav className="rail-nav" aria-label="Central Admin">
+          <Link href="/">Runtime</Link>
+          <Link href="/tenants/new">Tenant Oluştur</Link>
+          <Link href="/audit">Audit Center</Link>
         </nav>
+        <button className="ghost-button" type="button" onClick={logout}>
+          Çıkış
+        </button>
       </aside>
 
-      <section className="workspace-main">
-        <header className="topbar">
+      <section className="main-stage">
+        <header className="runtime-hero">
           <div>
-            <p className="eyebrow">Global Operations Center</p>
-            <h1>Commerce Operating System runtime kontrol kulesi</h1>
-            <div className="runtime-badges">
-              <span>{payload.status}</span>
-              <span>{payload.correlationId ?? "correlation bekleniyor"}</span>
-              <span>{payload.traceId ?? "trace bekleniyor"}</span>
-            </div>
+            <h1>Operasyon erişimi aktif</h1>
+            <p>
+              {principal?.name ?? principal?.email ?? "Super admin"} · {principal?.roles?.join(", ") ?? "role yok"} ·{" "}
+              {principal?.workspaceId ?? "workspace yok"}
+            </p>
           </div>
-          <div className="command-box" role="search">
-            <span aria-hidden="true">⌘</span>
-            <input aria-label="Global runtime search" placeholder="Tenant, event, queue, audit veya bridge ara" />
+          <div className="session-panel">
+            <span>Session</span>
+            <strong>{payload.me?.session?.status ?? "bilinmiyor"}</strong>
+            <small>{payload.me?.session?.sessionId ?? "session id bekleniyor"}</small>
           </div>
         </header>
 
-        <EmptyState payload={payload} />
-        <MetricStrip payload={payload} />
-
-        <section className="operations-band" id="operations" aria-label="NOC operasyon merkezi">
-          <div className="section-heading">
-            <p className="eyebrow">NOC / SOC Runtime</p>
-            <h2>Gerçek operasyon sinyalleri</h2>
-          </div>
-          <div className="operations-grid">
-            <article className="operation-tile">
-              <span />
-              <p>Runtime topology graph</p>
-              <strong>{center?.runtimeTopologyGraph ? "bağlı" : "beklemede"}</strong>
-            </article>
-            <article className="operation-tile">
-              <span />
-              <p>Sync topology graph</p>
-              <strong>{countOf(center?.syncTopologyGraph)}</strong>
-            </article>
-            <article className="operation-tile">
-              <span />
-              <p>Worker monitoring</p>
-              <strong>{center?.workerMonitoring?.state ?? "empty"}</strong>
-            </article>
-            <article className="operation-tile">
-              <span />
-              <p>Billing visibility</p>
-              <strong>{center?.billingVisibility?.state ?? "empty"}</strong>
-            </article>
-          </div>
+        <section className="metric-strip" aria-label="Gerçek runtime sayımları">
+          <article>
+            <span>Gateway</span>
+            <strong>{payload.healthMatrix?.status ?? "unknown"}</strong>
+          </article>
+          <article>
+            <span>Tenant</span>
+            <strong>{tenantCount}</strong>
+          </article>
+          <article>
+            <span>Queue State</span>
+            <strong>{queueCount}</strong>
+          </article>
+          <article>
+            <span>Audit Event</span>
+            <strong>{auditCount}</strong>
+          </article>
         </section>
 
-        <section className="split-band" id="tenants">
-          <div className="section-heading">
-            <p className="eyebrow">Tenant Lifecycle</p>
-            <h2>Tenant topology ve workspace registry</h2>
+        <section className="runtime-section">
+          <div className="section-title">
+            <h2>Runtime health</h2>
+            <Link href="/audit">Audit görünürlüğü</Link>
           </div>
-          <div className="runtime-grid">
-            {(center?.workspaceRegistry ?? []).map((workspace) => (
-              <article className="runtime-card" key={`${workspace.workspace_id}-${workspace.workspace_type}`}>
-                <h3>{workspace.workspace_type ?? "workspace"}</h3>
-                <p>{workspace.workspace_id ?? "workspace id bekleniyor"}</p>
-                <span>{workspace.enabled ? "aktif" : "kapalı"}</span>
+          <div className="health-grid">
+            {statusRows.map(({ service, entry }) => (
+              <article className="health-row" key={service}>
+                <div>
+                  <strong>{service}</strong>
+                  <span>{entry?.layer ?? "layer bekleniyor"}</span>
+                </div>
+                <mark data-state={entry?.status ?? "unknown"}>{entry?.status ?? "unknown"}</mark>
+                <small>{typeof entry?.latencyMs === "number" ? `${entry.latencyMs} ms` : "latency yok"}</small>
               </article>
             ))}
           </div>
         </section>
 
-        <section className="split-band" id="events">
-          <div className="section-heading">
-            <p className="eyebrow">Realtime Event Fabric</p>
-            <h2>Tenant ve workspace izole channel görünürlüğü</h2>
-          </div>
-          <div className="event-flow">
-            {(center?.realtimeEventStream ?? []).map((channel) => (
-              <article className="event-card" key={`${channel.channel}-${channel.subscriptionPath}`}>
-                <h3>{channel.channel ?? "channel"}</h3>
-                <p>{channel.subscriptionPath ?? "subscription path bekleniyor"}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="bridge-band" id="bridges">
-          <div className="section-heading">
-            <p className="eyebrow">Engine Orchestration</p>
-            <h2>Odoo ve Medusa operational bridge surface</h2>
-          </div>
-          <div className="bridge-grid">
-            <article className="bridge-panel">
-              <h3>Odoo Operational Bridge</h3>
-              <p>Raw Odoo UI kapalıdır; sadece gateway kontrollü operasyonlar görünür.</p>
-              <ul>
-                {odooOperations.map((operation) => (
-                  <li key={operation.operation}>{operation.operation}</li>
-                ))}
-              </ul>
-            </article>
-            <article className="bridge-panel">
-              <h3>Medusa Commerce Orchestration</h3>
-              <p>Admin UI kapalıdır; headless engine operasyonları izlenir.</p>
-              <ul>
-                {medusaOperations.map((operation) => (
-                  <li key={operation.operation}>{operation.operation}</li>
-                ))}
-              </ul>
-            </article>
-          </div>
-        </section>
-
-        <section className="runtime-band" id="audit">
-          <div className="section-heading">
-            <p className="eyebrow">Audit / Security</p>
-            <h2>Correlation ve trace görünürlüğü</h2>
-          </div>
-          <div className="runtime-grid">
-            {(center?.auditCenter ?? []).map((event, index) => (
-              <article className="runtime-card" key={index}>
-                <h3>Audit event</h3>
-                <p>{JSON.stringify(event)}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="runtime-band" id="ai">
-          <div className="section-heading">
-            <p className="eyebrow">AI Operations Layer</p>
-            <h2>AI sinyalleri ve izolasyon kontratları</h2>
-          </div>
-          <div className="runtime-grid">
-            {(center?.aiOperationsCenter?.contracts ?? []).map((contract) => (
-              <article className="runtime-card" key={contract}>
-                <h3>{contract}</h3>
-                <p>Gerçek sinyal geldiğinde audit ve tenant scope ile görünür.</p>
-              </article>
-            ))}
-          </div>
+        <section className="runtime-section two-column">
+          <article className="runtime-panel">
+            <h2>Medusa</h2>
+            <pre>{JSON.stringify(payload.medusaHealth ?? {}, null, 2)}</pre>
+          </article>
+          <article className="runtime-panel">
+            <h2>Queue / Audit</h2>
+            {queueCount === 0 && auditCount === 0 ? (
+              <EmptyOperationalState title="Operasyon kaydı bekleniyor" detail="Gerçek queue veya audit olayı oluştuğunda burada görünür." />
+            ) : (
+              <pre>{JSON.stringify({ queue: payload.queue?.queueStates, audit: payload.audit?.events }, null, 2)}</pre>
+            )}
+          </article>
         </section>
       </section>
     </main>

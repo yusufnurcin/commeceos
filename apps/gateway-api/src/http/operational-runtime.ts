@@ -58,6 +58,7 @@ interface PrincipalRow {
   readonly principal_id: string;
   readonly principal_type: string;
   readonly email: string | null;
+  readonly display_name: string | null;
   readonly email_verified_at: Date | string | null;
   readonly status: string;
 }
@@ -76,6 +77,7 @@ interface WorkspaceGrantRow {
 interface RefreshTokenRow {
   readonly token_id: string;
   readonly family_id: string;
+  readonly session_id: string;
   readonly principal_id: string;
   readonly principal_type: string;
   readonly tenant_id: string;
@@ -119,6 +121,10 @@ function emptyOperationalState(resource: string, reason: string, extra: JsonReco
   };
 }
 
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, `""`)}"`;
+}
+
 function unauthorized(reasons: readonly string[]) {
   return json(401, {
     status: "auth_required",
@@ -145,9 +151,46 @@ function requireProtected(input: OperationalRouteInput) {
   return reasons;
 }
 
+async function hasActiveJwtSession(input: OperationalRouteInput) {
+  if (input.auth.mechanism !== "jwt") {
+    return true;
+  }
+
+  if (!input.auth.sessionId) {
+    return false;
+  }
+
+  const session = await input.db.one<{ readonly session_id: string }>(
+    `SELECT session_id
+     FROM auth_core.sessions
+     WHERE session_id = $1
+       AND principal_id = $2
+       AND tenant_id = $3
+       AND workspace_id = $4
+       AND status = 'active'
+       AND expires_at > now()
+     LIMIT 1`,
+    [input.auth.sessionId, input.auth.principalId ?? "", input.context.tenantId ?? "", input.context.workspaceId ?? ""]
+  );
+
+  return Boolean(session);
+}
+
 function getHeader(request: IncomingMessage, name: string) {
   const value = request.headers[name.toLowerCase()];
   return Array.isArray(value) ? value[0] : value;
+}
+
+function getRemoteAddress(input: Pick<OperationalRouteInput, "request">) {
+  return (
+    getHeader(input.request, "x-forwarded-for")?.split(",")[0]?.trim() ??
+    input.request.socket.remoteAddress ??
+    "unknown"
+  );
+}
+
+function getUserAgent(input: Pick<OperationalRouteInput, "request">) {
+  return getHeader(input.request, "user-agent") ?? "unknown";
 }
 
 async function writeAudit(
@@ -176,12 +219,38 @@ async function writeAudit(
   );
 }
 
+async function writeLoginActivity(
+  db: RuntimeDatabase | RuntimeDatabaseClient,
+  input: Pick<OperationalRouteInput, "request" | "context">,
+  principalId: string | null,
+  deviceId: string | null,
+  result: "accepted" | "challenged" | "rejected",
+  riskLevel: "low" | "medium" | "high" | "blocked"
+) {
+  await db.query(
+    `INSERT INTO auth_core.login_activity
+      (principal_id, tenant_id, workspace_id, ip_hash, user_agent_hash, device_id, result, risk_level)
+     VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7, $8)`,
+    [
+      principalId,
+      input.context.tenantId ?? null,
+      input.context.workspaceId ?? null,
+      sha256(getRemoteAddress(input)),
+      sha256(getUserAgent(input)),
+      deviceId,
+      result,
+      riskLevel
+    ]
+  );
+}
+
 async function createOutboxEvent(
   db: RuntimeDatabaseClient,
   input: Pick<OperationalRouteInput, "context">,
   eventName: string,
   payload: JsonRecord,
-  idempotencyKey: string
+  idempotencyKey: string,
+  scope: { readonly tenantId?: string; readonly workspaceId?: string | null } = {}
 ) {
   const eventId = randomUUID();
   await db.query(
@@ -192,8 +261,8 @@ async function createOutboxEvent(
     [
       eventId,
       eventName,
-      input.context.tenantId ?? "platform",
-      input.context.workspaceId ?? null,
+      scope.tenantId ?? input.context.tenantId ?? "platform",
+      scope.workspaceId ?? input.context.workspaceId ?? null,
       idempotencyKey,
       input.context.correlationId,
       input.context.traceId,
@@ -274,6 +343,7 @@ async function issueSession(
 
   const access = signAccessToken(input.env, {
     sub: principal.principal_id,
+    session_id: session.session_id,
     principal_type: principal.principal_type,
     tenant_id: input.context.tenantId ?? "",
     workspace_id: input.context.workspaceId ?? "",
@@ -304,19 +374,19 @@ async function handleLogin(input: OperationalRouteInput) {
 
   const email = asString(input.body.email)?.toLowerCase();
   const password = asString(input.body.password);
-  const sessionFingerprint = getClientFingerprint(input);
-  const deviceFingerprint = getDeviceFingerprint(input);
-  if (!email || !password || !sessionFingerprint || !deviceFingerprint) {
+  const sessionFingerprint = getClientFingerprint(input) ?? randomToken(18);
+  const deviceFingerprint = getDeviceFingerprint(input) ?? randomToken(18);
+  if (!email || !password) {
     return json(400, {
       status: "login_contract_invalid",
-      required: ["email", "password", SESSION_FINGERPRINT_HEADER, DEVICE_ID_HEADER]
+      required: ["email", "password"]
     });
   }
 
   try {
     return await input.db.transaction(async (client) => {
       const principal = await client.one<PrincipalRow>(
-        `SELECT principal_id, principal_type, email, email_verified_at, status
+        `SELECT principal_id, principal_type, email, display_name, email_verified_at, status
          FROM auth_core.principals
          WHERE lower(email) = lower($1)
          LIMIT 1`,
@@ -325,11 +395,13 @@ async function handleLogin(input: OperationalRouteInput) {
 
       const loginPayload = { emailHash: sha256(email), tenantId: input.context.tenantId, workspaceId: input.context.workspaceId };
       if (!principal || principal.status !== "active") {
+        await writeLoginActivity(client, input, principal?.principal_id ?? null, null, "rejected", "medium");
         await writeAudit(client, input, "auth.login", "rejected", { ...loginPayload, reason: "principal_not_active" });
         return json(401, { status: "invalid_credentials" });
       }
 
       if (!principal.email_verified_at) {
+        await writeLoginActivity(client, input, principal.principal_id, null, "rejected", "medium");
         await writeAudit(client, input, "auth.login", "rejected", { ...loginPayload, reason: "email_not_verified" });
         return json(403, { status: "email_verification_required" });
       }
@@ -344,6 +416,7 @@ async function handleLogin(input: OperationalRouteInput) {
       );
 
       if (!credential || !verifyPassword(password, credential.password_hash, credential.password_hash_algorithm)) {
+        await writeLoginActivity(client, input, principal.principal_id, null, "rejected", "medium");
         await writeAudit(client, input, "auth.login", "rejected", { ...loginPayload, reason: "credential_mismatch" });
         return json(401, { status: "invalid_credentials" });
       }
@@ -358,6 +431,7 @@ async function handleLogin(input: OperationalRouteInput) {
       );
 
       if (!grant) {
+        await writeLoginActivity(client, input, principal.principal_id, null, "rejected", "medium");
         await writeAudit(client, input, "auth.login", "rejected", { ...loginPayload, reason: "workspace_access_missing" });
         return json(403, { status: "workspace_access_denied" });
       }
@@ -373,6 +447,7 @@ async function handleLogin(input: OperationalRouteInput) {
       );
 
       if (!device || device.trust_state === "revoked") {
+        await writeLoginActivity(client, input, principal.principal_id, device?.device_id ?? null, "rejected", "blocked");
         await writeAudit(client, input, "auth.login", "rejected", { ...loginPayload, reason: "device_revoked" });
         return json(403, { status: "device_revoked" });
       }
@@ -397,6 +472,7 @@ async function handleLogin(input: OperationalRouteInput) {
             new Date(Date.now() + 5 * 60 * 1000)
           ]
         );
+        await writeLoginActivity(client, input, principal.principal_id, device.device_id, "challenged", "medium");
         await writeAudit(client, input, "auth.login", "challenged", loginPayload);
         return json(202, {
           status: "mfa_required",
@@ -414,8 +490,21 @@ async function handleLogin(input: OperationalRouteInput) {
         device.device_id,
         sha256(sessionFingerprint)
       );
+      await writeLoginActivity(client, input, principal.principal_id, device.device_id, "accepted", "low");
       await writeAudit(client, input, "auth.login", "accepted", loginPayload);
-      return json(200, { status: "ok", ...tokenPayload });
+      return json(200, {
+        status: "ok",
+        principal: {
+          principalId: principal.principal_id,
+          email: principal.email,
+          name: principal.display_name,
+          roles: grant.role_ids,
+          workspaceId: input.context.workspaceId,
+          tenantId: input.context.tenantId
+        },
+        sessionFingerprint,
+        ...tokenPayload
+      });
     });
   } catch (error) {
     if (isRuntimeStoreUnavailable(error)) {
@@ -436,7 +525,7 @@ async function handleRefresh(input: OperationalRouteInput) {
     return await input.db.transaction(async (client) => {
       const tokenHash = sha256(refreshToken);
       const row = await client.one<RefreshTokenRow>(
-        `SELECT rt.token_id, rt.family_id, rt.used_at, rt.revoked_at, rt.expires_at,
+        `SELECT rt.token_id, rt.family_id, s.session_id, rt.used_at, rt.revoked_at, rt.expires_at,
                 rtf.status AS family_status, rtf.principal_id, rtf.tenant_id, rtf.workspace_id, rtf.device_id,
                 s.session_fingerprint_hash, s.mfa_verified,
                 p.principal_type,
@@ -483,6 +572,7 @@ async function handleRefresh(input: OperationalRouteInput) {
 
       const access = signAccessToken(input.env, {
         sub: row.principal_id,
+        session_id: row.session_id,
         principal_type: row.principal_type,
         tenant_id: row.tenant_id,
         workspace_id: row.workspace_id,
@@ -517,16 +607,43 @@ async function handleLogout(input: OperationalRouteInput) {
     return unauthorized(reasons);
   }
 
-  const sessionId = asString(input.body.sessionId);
+  if (input.auth.mechanism !== "jwt") {
+    return unauthorized(["jwt_session_required"]);
+  }
+
+  const sessionId = asString(input.body.sessionId) ?? input.auth.sessionId;
   try {
-    await input.db.query(
-      `UPDATE auth_core.sessions
-       SET status = 'revoked', revoked_at = now()
-       WHERE principal_id = $1 AND tenant_id = $2 AND workspace_id = $3
-         AND ($4::uuid IS NULL OR session_id = $4::uuid)`,
-      [input.auth.principalId ?? "", input.context.tenantId ?? "", input.context.workspaceId ?? "", sessionId ?? null]
-    );
-    await writeAudit(input.db, input, "auth.logout", "accepted", { sessionId: sessionId ?? "current_scope" });
+    await input.db.transaction(async (client) => {
+      const sessions = await client.query<{ readonly session_id: string; readonly refresh_token_family_id: string }>(
+        `SELECT session_id, refresh_token_family_id
+         FROM auth_core.sessions
+         WHERE principal_id = $1 AND tenant_id = $2 AND workspace_id = $3
+           AND ($4::uuid IS NULL OR session_id = $4::uuid)`,
+        [input.auth.principalId ?? "", input.context.tenantId ?? "", input.context.workspaceId ?? "", sessionId ?? null]
+      );
+      const sessionIds = sessions.map((session) => session.session_id);
+      const familyIds = sessions.map((session) => session.refresh_token_family_id);
+
+      await client.query(
+        `UPDATE auth_core.sessions
+         SET status = 'revoked', revoked_at = now()
+         WHERE session_id = ANY($1::uuid[])`,
+        [sessionIds]
+      );
+      await client.query(
+        `UPDATE auth_core.refresh_token_families
+         SET status = 'revoked', revoked_at = now()
+         WHERE family_id = ANY($1::uuid[])`,
+        [familyIds]
+      );
+      await client.query(
+        `UPDATE auth_core.refresh_tokens
+         SET revoked_at = now()
+         WHERE family_id = ANY($1::uuid[]) AND revoked_at IS NULL`,
+        [familyIds]
+      );
+      await writeAudit(client, input, "auth.logout", "accepted", { sessionId: sessionId ?? "current_scope" });
+    });
     return json(200, { status: "ok" });
   } catch (error) {
     if (isRuntimeStoreUnavailable(error)) {
@@ -542,22 +659,52 @@ async function handleMe(input: OperationalRouteInput) {
     return unauthorized(reasons);
   }
 
-  return json(200, {
-    status: "ok",
-    principal: {
-      principalId: input.auth.principalId,
-      principalType: input.auth.principalType,
-      tenantId: input.context.tenantId,
-      workspaceId: input.context.workspaceId,
-      roles: input.auth.roles,
-      permissions: input.auth.permissions,
-      mfaVerified: input.auth.mfaVerified
-    },
-    realtimeAuthState: {
-      channel: `tenant:${input.context.tenantId}:workspace:${input.context.workspaceId}:auth`,
-      isolated: true
+  try {
+    if (!(await hasActiveJwtSession(input))) {
+      return unauthorized(["session_inactive"]);
     }
-  });
+
+    const principal = await input.db.one<{
+      readonly email: string | null;
+      readonly display_name: string | null;
+      readonly status: string;
+    }>(
+      `SELECT email, display_name, status
+       FROM auth_core.principals
+       WHERE principal_id = $1
+       LIMIT 1`,
+      [input.auth.principalId ?? ""]
+    );
+
+    return json(200, {
+      status: "ok",
+      principal: {
+        principalId: input.auth.principalId,
+        principalType: input.auth.principalType,
+        email: principal?.email,
+        name: principal?.display_name,
+        tenantId: input.context.tenantId,
+        workspaceId: input.context.workspaceId,
+        roles: input.auth.roles,
+        permissions: input.auth.permissions,
+        mfaVerified: input.auth.mfaVerified
+      },
+      session: {
+        sessionId: input.auth.sessionId,
+        status: "active",
+        deviceId: input.auth.deviceId
+      },
+      realtimeAuthState: {
+        channel: `tenant:${input.context.tenantId}:workspace:${input.context.workspaceId}:auth`,
+        isolated: true
+      }
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "auth.me" });
+    }
+    throw error;
+  }
 }
 
 async function handleSessions(input: OperationalRouteInput) {
@@ -599,13 +746,36 @@ async function handleSessionRevoke(input: OperationalRouteInput) {
   }
 
   try {
-    await input.db.query(
-      `UPDATE auth_core.sessions
-       SET status = 'revoked', revoked_at = now()
-       WHERE session_id = $1 AND principal_id = $2 AND tenant_id = $3 AND workspace_id = $4`,
-      [sessionId, input.auth.principalId ?? "", input.context.tenantId ?? "", input.context.workspaceId ?? ""]
-    );
-    await writeAudit(input.db, input, "auth.session.revoke", "accepted", { sessionId });
+    await input.db.transaction(async (client) => {
+      const session = await client.one<{ readonly refresh_token_family_id: string }>(
+        `SELECT refresh_token_family_id
+         FROM auth_core.sessions
+         WHERE session_id = $1 AND principal_id = $2 AND tenant_id = $3 AND workspace_id = $4
+         LIMIT 1`,
+        [sessionId, input.auth.principalId ?? "", input.context.tenantId ?? "", input.context.workspaceId ?? ""]
+      );
+      await client.query(
+        `UPDATE auth_core.sessions
+         SET status = 'revoked', revoked_at = now()
+         WHERE session_id = $1 AND principal_id = $2 AND tenant_id = $3 AND workspace_id = $4`,
+        [sessionId, input.auth.principalId ?? "", input.context.tenantId ?? "", input.context.workspaceId ?? ""]
+      );
+      if (session) {
+        await client.query(
+          `UPDATE auth_core.refresh_token_families
+           SET status = 'revoked', revoked_at = now()
+           WHERE family_id = $1`,
+          [session.refresh_token_family_id]
+        );
+        await client.query(
+          `UPDATE auth_core.refresh_tokens
+           SET revoked_at = now()
+           WHERE family_id = $1 AND revoked_at IS NULL`,
+          [session.refresh_token_family_id]
+        );
+      }
+      await writeAudit(client, input, "auth.session.revoke", "accepted", { sessionId });
+    });
     return json(200, { status: "ok" });
   } catch (error) {
     if (isRuntimeStoreUnavailable(error)) {
@@ -685,34 +855,67 @@ async function handleTenantCreate(input: OperationalRouteInput) {
     return unauthorized(reasons);
   }
 
-  const tenantId = asString(input.body.tenantId);
-  const brandName = asString(input.body.brandName);
-  const defaultLocale = asString(input.body.defaultLocale) ?? "tr-TR";
-  const defaultCurrency = asString(input.body.defaultCurrency) ?? "TRY";
+  if (!input.auth.roles.includes("super_admin")) {
+    return json(403, { status: "super_admin_required" });
+  }
+
+  if (!(await hasActiveJwtSession(input))) {
+    return unauthorized(["session_inactive"]);
+  }
+
+  const slug = asString(input.body.slug) ?? asString(input.body.tenantId);
+  const displayName = asString(input.body.tenantName) ?? asString(input.body.displayName) ?? asString(input.body.brandName);
+  const countryCode = asString(input.body.country) ?? asString(input.body.countryCode) ?? "TR";
+  const defaultLocale = asString(input.body.locale) ?? asString(input.body.defaultLocale) ?? "tr-TR";
+  const defaultCurrency = asString(input.body.currency) ?? asString(input.body.defaultCurrency) ?? "TRY";
   const timezone = asString(input.body.timezone) ?? "Europe/Istanbul";
+  const erpMode = asString(input.body.erpMode) ?? "odoo-placeholder";
+  const commerceMode = asString(input.body.commerceMode) ?? "medusa-placeholder";
   const requestedWorkspaces = asStringArray(input.body.workspaces) ?? workspaceTypes;
   const invalidWorkspace = requestedWorkspaces.find((workspace) => !workspaceTypes.includes(workspace as WorkspaceType));
-  if (!tenantId || !brandName || invalidWorkspace) {
-    return json(400, {
-      status: "tenant_onboarding_contract_invalid",
-      required: ["tenantId", "brandName"],
-      invalidWorkspace
+  const tenantId = slug?.trim().toLowerCase();
+
+  if (
+    !tenantId ||
+    !/^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/.test(tenantId) ||
+    !displayName ||
+    displayName.length < 2 ||
+    !/^[A-Z]{2}$/.test(countryCode) ||
+    invalidWorkspace
+  ) {
+    return json(422, {
+      status: "tenant_payload_invalid",
+      required: ["tenantName", "slug", "country", "currency", "locale", "timezone", "erpMode", "commerceMode"],
+      constraints: {
+        slug: "lowercase letters, numbers and hyphen; 3-63 chars",
+        country: "ISO-3166 alpha-2",
+        invalidWorkspace
+      }
     });
   }
 
   const isolationPlan = createTenantIsolationPlan(tenantId);
   const idempotencyKey = getHeader(input.request, defaultRetryPolicy.idempotencyKeyHeader) ?? `tenant-onboarding:${tenantId}`;
-  const normalizedTenantId = tenantId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+  const normalizedTenantId = tenantId.trim().toLowerCase().replace(/[^a-z0-9]/g, "_");
 
   try {
     return await input.db.transaction(async (client) => {
-      await client.query(`CREATE SCHEMA IF NOT EXISTS tenant_${normalizedTenantId}`);
+      const existing = await client.one<{ readonly tenant_id: string }>(
+        `SELECT tenant_id FROM tenant_registry.tenants WHERE tenant_id = $1 LIMIT 1`,
+        [tenantId]
+      );
+
+      if (existing) {
+        await writeAudit(client, input, "tenant.create", "rejected", { tenantId, reason: "duplicate_slug" });
+        return json(409, { status: "tenant_slug_conflict", tenantId });
+      }
+
+      await client.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(`tenant_${normalizedTenantId}`)}`);
       await client.query(
-        `INSERT INTO tenant_registry.tenants (tenant_id, lifecycle_state, isolation_mode, default_locale, default_currency)
-         VALUES ($1, 'provisioning', $2, $3, $4)
-         ON CONFLICT (tenant_id) DO UPDATE
-         SET updated_at = now(), default_locale = excluded.default_locale, default_currency = excluded.default_currency`,
-        [tenantId, isolationPlan.isolationMode, defaultLocale, defaultCurrency]
+        `INSERT INTO tenant_registry.tenants
+          (tenant_id, lifecycle_state, isolation_mode, default_locale, default_currency, display_name, country_code, timezone)
+         VALUES ($1, 'provisioning', $2, $3, $4, $5, $6, $7)`,
+        [tenantId, isolationPlan.isolationMode, defaultLocale, defaultCurrency, displayName, countryCode, timezone]
       );
       await client.query(
         `INSERT INTO tenant_isolation.isolation_plans
@@ -743,7 +946,7 @@ async function handleTenantCreate(input: OperationalRouteInput) {
         `INSERT INTO tenant_registry.tenant_branding (tenant_id, brand_name, color_tokens)
          VALUES ($1, $2, $3::jsonb)
          ON CONFLICT (tenant_id) DO UPDATE SET brand_name = excluded.brand_name, color_tokens = excluded.color_tokens`,
-        [tenantId, brandName, input.body.colorTokens && typeof input.body.colorTokens === "object" ? input.body.colorTokens : {}]
+        [tenantId, displayName, input.body.colorTokens && typeof input.body.colorTokens === "object" ? input.body.colorTokens : {}]
       );
       await client.query(
         `INSERT INTO tenant_registry.tenant_locale_currency
@@ -776,48 +979,59 @@ async function handleTenantCreate(input: OperationalRouteInput) {
       }
 
       await client.query(
-        `INSERT INTO tenant_registry.tenant_erp_bridges (tenant_id, odoo_database, odoo_company_ids, raw_ui_allowed, enabled)
-         VALUES ($1, $2, $3, false, true)
+        `INSERT INTO tenant_registry.tenant_erp_bridges
+          (tenant_id, odoo_database, odoo_company_ids, raw_ui_allowed, enabled, provisioning_status)
+         VALUES ($1, $2, $3, false, true, $4)
          ON CONFLICT DO NOTHING`,
-        [tenantId, `odoo_${normalizedTenantId}`, []]
+        [tenantId, `odoo_${normalizedTenantId}`, [], erpMode]
       );
       await client.query(
-        `INSERT INTO tenant_registry.tenant_commerce_bridges (tenant_id, medusa_region_scope, admin_ui_allowed, enabled)
-         VALUES ($1, $2, false, true)
+        `INSERT INTO tenant_registry.tenant_commerce_bridges
+          (tenant_id, medusa_region_scope, admin_ui_allowed, enabled, provisioning_status)
+         VALUES ($1, $2, false, true, $3)
          ON CONFLICT DO NOTHING`,
-        [tenantId, `region_${normalizedTenantId}`]
+        [tenantId, `region_${normalizedTenantId}`, commerceMode]
       );
 
       const eventId = await createOutboxEvent(
         client,
         input,
-        "workflow.command.accepted",
-        { tenantId, workspaces: requestedWorkspaces, isolationPlan },
-        idempotencyKey
+        "tenant_created",
+        { tenantId, displayName, countryCode, defaultLocale, defaultCurrency, timezone, workspaces: requestedWorkspaces, isolationPlan },
+        idempotencyKey,
+        { tenantId, workspaceId: "central-admin" }
       );
       await client.query(
         `INSERT INTO tenant_registry.tenant_lifecycle_events (tenant_id, from_state, to_state, reason, correlation_id)
          VALUES ($1, NULL, 'provisioning', 'tenant_onboarding_runtime_started', $2)`,
         [tenantId, input.context.correlationId]
       );
-      await writeAudit(client, input, "tenant.onboarding.create", "accepted", { tenantId, eventId });
+      await writeAudit(client, input, "tenant_created", "accepted", { tenantId, eventId });
 
-      return json(202, {
-        status: "orchestration_started",
-        tenantId,
+      return json(201, {
+        status: "tenant_created",
+        tenant: {
+          tenantId,
+          displayName,
+          countryCode,
+          defaultLocale,
+          defaultCurrency,
+          timezone,
+          lifecycleState: "provisioning"
+        },
+        namespaces: {
+          cache: isolationPlan.cacheNamespace,
+          queue: isolationPlan.queueNamespace,
+          event: isolationPlan.eventNamespace,
+          storage: isolationPlan.storageNamespace,
+          postgresSchema: isolationPlan.postgresSchema
+        },
+        bridgeState: {
+          odoo: erpMode,
+          medusa: commerceMode
+        },
         eventId,
-        isolationPlan,
-        tenantMiddlewareScopes,
-        orchestrationFlow: [
-          "tenant_registry",
-          "workspace_provisioning",
-          "isolated_namespace_creation",
-          "branding_locale_currency",
-          "odoo_bridge_provisioning",
-          "medusa_bridge_provisioning",
-          "storage_queue_cache_realtime_audit_namespace",
-          "event_outbox"
-        ]
+        tenantMiddlewareScopes
       });
     });
   } catch (error) {
@@ -836,7 +1050,7 @@ async function handleTenantRegistry(input: OperationalRouteInput) {
 
   try {
     const tenants = await input.db.query(
-      `SELECT tenant_id, lifecycle_state, isolation_mode, default_locale, default_currency, created_at, updated_at
+      `SELECT tenant_id, display_name, country_code, lifecycle_state, isolation_mode, default_locale, default_currency, timezone, created_at, updated_at
        FROM tenant_registry.tenants
        ORDER BY updated_at DESC
        LIMIT 100`
@@ -849,6 +1063,102 @@ async function handleTenantRegistry(input: OperationalRouteInput) {
   } catch (error) {
     if (isRuntimeStoreUnavailable(error)) {
       return json(200, emptyOperationalState("tenant.registry", "runtime_store_unavailable", { status: "store_unavailable" }));
+    }
+    throw error;
+  }
+}
+
+async function handleTenantDetail(input: OperationalRouteInput, tenantId: string) {
+  const reasons = requireProtected(input);
+  if (reasons.length > 0) {
+    return unauthorized(reasons);
+  }
+
+  try {
+    const tenant = await input.db.one(
+      `SELECT tenant_id, display_name, country_code, lifecycle_state, isolation_mode, default_locale, default_currency, timezone, created_at, updated_at
+       FROM tenant_registry.tenants
+       WHERE tenant_id = $1
+       LIMIT 1`,
+      [tenantId]
+    );
+
+    if (!tenant) {
+      return json(404, { status: "tenant_not_found", tenantId });
+    }
+
+    const [workspaces, isolation, erpBridges, commerceBridges, auditEvents, outboxEvents] = await Promise.all([
+      input.db.query(
+        `SELECT workspace_id, workspace_type, enabled, role_ids
+         FROM tenant_registry.tenant_workspaces
+         WHERE tenant_id = $1
+         ORDER BY workspace_type`,
+        [tenantId]
+      ),
+      input.db.one(
+        `SELECT postgres_schema, redis_key_prefix, minio_bucket_prefix, meilisearch_index_prefix,
+                cache_namespace, queue_namespace, event_namespace, storage_namespace
+         FROM tenant_isolation.isolation_plans
+         WHERE tenant_id = $1
+         LIMIT 1`,
+        [tenantId]
+      ),
+      input.db.query(
+        `SELECT engine, odoo_database, raw_ui_allowed, enabled, provisioning_status
+         FROM tenant_registry.tenant_erp_bridges
+         WHERE tenant_id = $1
+         ORDER BY engine`,
+        [tenantId]
+      ),
+      input.db.query(
+        `SELECT engine, medusa_region_scope, admin_ui_allowed, enabled, provisioning_status
+         FROM tenant_registry.tenant_commerce_bridges
+         WHERE tenant_id = $1
+         ORDER BY engine`,
+        [tenantId]
+      ),
+      input.db.query(
+        `SELECT audit_id, action, result, payload, occurred_at
+         FROM operational_audit.audit_events
+         WHERE tenant_id = $1 OR payload->>'tenantId' = $1
+         ORDER BY occurred_at DESC
+         LIMIT 50`,
+        [tenantId]
+      ),
+      input.db.query(
+        `SELECT event_id, event_name, delivery_state, occurred_at
+         FROM event_core.event_outbox
+         WHERE tenant_id = $1 OR payload->>'tenantId' = $1
+         ORDER BY occurred_at DESC
+         LIMIT 50`,
+        [tenantId]
+      )
+    ]);
+
+    return json(200, {
+      status: "ok",
+      tenant,
+      workspaces,
+      namespaces: isolation,
+      bridgeState: {
+        odoo: erpBridges,
+        medusa: commerceBridges
+      },
+      realtimeChannels: defaultRealtimeSubscriptions.map((subscription) => ({
+        ...subscription,
+        tenantChannel: `tenant:${tenantId}:${subscription.channel}`
+      })),
+      auditEvents,
+      outboxEvents,
+      storageNamespace: (isolation as { readonly storage_namespace?: string } | undefined)?.storage_namespace,
+      emptyState:
+        auditEvents.length === 0 && outboxEvents.length === 0
+          ? emptyOperationalState("tenant.detail", "tenant_runtime_events_not_found")
+          : undefined
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "tenant.detail" });
     }
     throw error;
   }
@@ -1239,6 +1549,7 @@ export function isOperationalRuntimeRoute(pathname: string) {
   return (
     pathname.startsWith("/v1/auth/") ||
     pathname === "/v1/tenants" ||
+    pathname.startsWith("/v1/tenants/") ||
     pathname === "/v1/tenants/registry" ||
     pathname === "/v1/workspaces/runtime" ||
     pathname === "/v1/workspaces/registry" ||
@@ -1263,6 +1574,7 @@ export async function handleOperationalRoute(input: OperationalRouteInput): Prom
         return handleSessions(input);
       case "/v1/auth/activity":
         return handleActivity(input);
+      case "/v1/tenants":
       case "/v1/tenants/registry":
         return handleTenantRegistry(input);
       case "/v1/workspaces/runtime":
@@ -1283,6 +1595,12 @@ export async function handleOperationalRoute(input: OperationalRouteInput): Prom
       case "/v1/runtime/verification":
         return handleRuntimeVerification(input);
       default:
+        if (input.pathname.startsWith("/v1/tenants/")) {
+          const tenantId = decodeURIComponent(input.pathname.slice("/v1/tenants/".length));
+          if (tenantId && tenantId !== "registry") {
+            return handleTenantDetail(input, tenantId);
+          }
+        }
         break;
     }
   }

@@ -6,6 +6,24 @@ CREATE SCHEMA IF NOT EXISTS workspace_runtime;
 CREATE SCHEMA IF NOT EXISTS operational_audit;
 CREATE SCHEMA IF NOT EXISTS ai_ops;
 
+ALTER TABLE auth_core.principals
+  ADD COLUMN IF NOT EXISTS display_name text;
+
+ALTER TABLE tenant_registry.tenants
+  ADD COLUMN IF NOT EXISTS display_name text,
+  ADD COLUMN IF NOT EXISTS country_code text,
+  ADD COLUMN IF NOT EXISTS timezone text;
+
+ALTER TABLE tenant_registry.tenant_erp_bridges
+  ADD COLUMN IF NOT EXISTS provisioning_status text NOT NULL DEFAULT 'placeholder_pending';
+ALTER TABLE tenant_registry.tenant_erp_bridges
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
+ALTER TABLE tenant_registry.tenant_commerce_bridges
+  ADD COLUMN IF NOT EXISTS provisioning_status text NOT NULL DEFAULT 'placeholder_pending';
+ALTER TABLE tenant_registry.tenant_commerce_bridges
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
 ALTER TABLE tenant_isolation.isolation_plans
   ADD COLUMN IF NOT EXISTS cache_namespace text,
   ADD COLUMN IF NOT EXISTS queue_namespace text,
@@ -107,6 +125,7 @@ INSERT INTO event_core.event_contracts
   (event_name, domain, current_version, minimum_supported_version, tenant_scoped, workspace_scoped, idempotency_required, audit_required, realtime_fanout, payload_schema_ref)
 VALUES
   ('workflow.command.accepted', 'workflow', 1, 1, true, true, true, true, true, 'schema://events/workflow.command.accepted.v1'),
+  ('tenant_created', 'tenant', 1, 1, true, false, true, true, true, 'schema://events/tenant.created.v1'),
   ('sync.job.requested', 'sync', 1, 1, true, false, true, true, true, 'schema://events/sync.job.requested.v1'),
   ('erp.bridge.operation.requested', 'erp-bridge', 1, 1, true, true, true, true, true, 'schema://events/erp.bridge.operation.requested.v1'),
   ('commerce.orchestration.requested', 'commerce', 1, 1, true, true, true, true, true, 'schema://events/commerce.orchestration.requested.v1'),
@@ -126,3 +145,5 @@ CREATE INDEX IF NOT EXISTS activity_stream_tenant_workspace_idx ON workspace_run
 CREATE INDEX IF NOT EXISTS notifications_tenant_workspace_idx ON workspace_runtime.notifications (tenant_id, workspace_id, created_at);
 CREATE INDEX IF NOT EXISTS audit_events_tenant_workspace_idx ON operational_audit.audit_events (tenant_id, workspace_id, occurred_at);
 CREATE INDEX IF NOT EXISTS ai_operational_signals_scope_idx ON ai_ops.operational_signals (tenant_id, workspace_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS tenant_erp_bridge_engine_idx ON tenant_registry.tenant_erp_bridges (tenant_id, engine);
+CREATE UNIQUE INDEX IF NOT EXISTS tenant_commerce_bridge_engine_idx ON tenant_registry.tenant_commerce_bridges (tenant_id, engine);

@@ -189,6 +189,8 @@ services:
       ADMIN_CORS: ${ADMIN_CORS:-http://localhost:3001}
       AUTH_CORS: ${AUTH_CORS:-http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005}
     command: ["sh", "-c", "pnpm --filter @commerce-os/medusa runtime"]
+    ports:
+      - "9000:9000"
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:9000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s
@@ -235,8 +237,12 @@ services:
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-commerce_os_gateway_jwt_dev_secret_change_before_prod}
       GATEWAY_SERVICE_TOKEN: ${GATEWAY_SERVICE_TOKEN:-commerce_os_gateway_service_dev_token}
       SECURE_COOKIE_DOMAIN: ${SECURE_COOKIE_DOMAIN:-localhost}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@commerceos.local}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-CommerceOS@2026!}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Commerce OS Super Admin}
+      BOOTSTRAP_ALLOW_DEV_CREDENTIALS: ${BOOTSTRAP_ALLOW_DEV_CREDENTIALS:-true}
     ports:
-      - "${GATEWAY_PORT:-8080}:8080"
+      - "8088:8080"
     depends_on:
       postgres:
         condition: service_healthy

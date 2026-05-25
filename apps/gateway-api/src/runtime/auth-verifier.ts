@@ -24,6 +24,7 @@ export interface VerifiedAuthContext {
   readonly roles: readonly string[];
   readonly permissions: readonly string[];
   readonly tokenId?: string;
+  readonly sessionId?: string;
   readonly sessionFingerprintHash?: string;
   readonly deviceId?: string;
   readonly mfaVerified?: boolean;
@@ -38,6 +39,7 @@ interface JwtClaims {
   readonly nbf?: number;
   readonly jti?: string;
   readonly token_type?: "access" | "refresh";
+  readonly session_id?: string;
   readonly principal_type?: PrincipalType;
   readonly tenant_id?: string;
   readonly workspace_id?: string;
@@ -183,6 +185,7 @@ function verifyJwt(request: IncomingMessage, env: GatewayEnvironment): VerifiedA
     ...(claims.tenant_id ? { tenantId: claims.tenant_id } : {}),
     ...(claims.workspace_id ? { workspaceId: claims.workspace_id } : {}),
     ...(claims.jti ? { tokenId: claims.jti } : {}),
+    ...(claims.session_id ? { sessionId: claims.session_id } : {}),
     ...(claims.session_fingerprint_hash ? { sessionFingerprintHash: claims.session_fingerprint_hash } : {}),
     ...(claims.device_id ? { deviceId: claims.device_id } : {}),
     ...(typeof claims.mfa_verified === "boolean" ? { mfaVerified: claims.mfa_verified } : {})

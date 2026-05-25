@@ -8,11 +8,14 @@ COPY package.json pnpm-workspace.yaml turbo.json tsconfig.base.json ./
 COPY apps ./apps
 COPY services ./services
 COPY packages ./packages
+COPY infra ./infra
 
 RUN pnpm install --frozen-lockfile=false
 
 ARG WORKSPACE_PACKAGE
 ENV WORKSPACE_PACKAGE=${WORKSPACE_PACKAGE}
+
+RUN pnpm build
 
 EXPOSE 3000 8080 8091 8092 8093 8094 9000
 

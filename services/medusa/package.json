@@ -5,9 +5,9 @@
   "type": "commonjs",
   "scripts": {
     "dev": "cross-env TS_NODE_PROJECT=tsconfig.json MEDUSA_ADMIN_DISABLED=true medusa develop --host 0.0.0.0",
-    "runtime": "cross-env TS_NODE_PROJECT=tsconfig.json MEDUSA_ADMIN_DISABLED=true MEDUSA_MIGRATION_MODE=true medusa db:migrate --execute-safe-links && cross-env TS_NODE_PROJECT=tsconfig.json MEDUSA_ADMIN_DISABLED=true medusa develop --host 0.0.0.0",
+    "runtime": "cross-env MEDUSA_ADMIN_DISABLED=true MEDUSA_MIGRATION_MODE=true medusa db:migrate --execute-safe-links && cross-env MEDUSA_ADMIN_DISABLED=true medusa start --host 0.0.0.0",
     "build": "cross-env TS_NODE_PROJECT=tsconfig.json MEDUSA_ADMIN_DISABLED=true medusa build",
-    "start": "cross-env TS_NODE_PROJECT=tsconfig.json MEDUSA_ADMIN_DISABLED=true medusa start",
+    "start": "cross-env MEDUSA_ADMIN_DISABLED=true medusa start --host 0.0.0.0",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit"
   },

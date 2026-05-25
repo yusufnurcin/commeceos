@@ -230,7 +230,7 @@ export function createTenantIsolationPlan(
   isolationMode: TenantIsolationMode = "schema-per-tenant",
   dataResidencyMode: DataResidencyMode = "country-bound"
 ): TenantIsolationPlan {
-  const normalizedTenantId = tenantId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+  const normalizedTenantId = tenantId.trim().toLowerCase().replace(/[^a-z0-9]/g, "_");
 
   return {
     tenantId,

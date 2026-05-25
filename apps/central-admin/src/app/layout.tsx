@@ -4,13 +4,13 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "Zyber Cart Commerce OS | Global Control Center",
-  description: "Tenant izole, event-driven commerce operating system kontrol merkezi."
+  title: "Commerce OS Central Admin",
+  description: "Gerçek auth, tenant provisioning ve runtime operasyon merkezi."
 };
 
 export default function RootLayout({ children }: { readonly children: ReactNode }) {
   return (
-    <html lang="tr">
+    <html lang="tr" suppressHydrationWarning>
       <body>{children}</body>
     </html>
   );

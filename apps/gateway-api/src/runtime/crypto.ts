@@ -9,6 +9,7 @@ export interface JwtClaims {
   readonly iat: number;
   readonly jti: string;
   readonly token_type: "access";
+  readonly session_id: string;
   readonly principal_type: string;
   readonly tenant_id: string;
   readonly workspace_id: string;
@@ -67,4 +68,14 @@ export function verifyPassword(password: string, encodedHash: string, algorithm:
 
   const actual = pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("base64url");
   return constantTimeEquals(actual, expectedHash);
+}
+
+export function hashPassword(password: string) {
+  const iterations = 210_000;
+  const salt = randomBytes(16).toString("base64url");
+  const hash = pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("base64url");
+  return {
+    algorithm: "pbkdf2-sha256",
+    encodedHash: `pbkdf2-sha256$${iterations}$${salt}$${hash}`
+  };
 }

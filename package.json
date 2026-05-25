@@ -8,6 +8,7 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
+    "platform:bootstrap": "pnpm --filter @commerce-os/gateway-api platform:bootstrap",
     "env:validate": "powershell -NoProfile -ExecutionPolicy Bypass -File ./infra/env/validate-foundation-env.ps1 -EnvFile ./infra/env/local.example.env",
     "health:infra": "powershell -NoProfile -ExecutionPolicy Bypass -File ./infra/healthchecks/check-foundation.ps1",
     "docker:config": "docker compose --env-file ./infra/env/local.example.env config",
