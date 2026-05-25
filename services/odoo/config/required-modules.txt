@@ -1,0 +1,11 @@
+account
+account_accountant
+sale_management
+purchase
+stock
+crm
+hr
+mrp
+point_of_sale
+website_sale
+l10n_tr

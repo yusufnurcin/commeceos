@@ -1,0 +1,23 @@
+{
+  "name": "@commerce-os/central-admin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@commerce-os/auth-core": "workspace:*",
+    "@commerce-os/commerce-core": "workspace:*",
+    "@commerce-os/sync-core": "workspace:*",
+    "@commerce-os/tenant-core": "workspace:*",
+    "@commerce-os/ui-system": "workspace:*",
+    "next": "^15.1.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

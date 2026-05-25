@@ -1,0 +1,408 @@
+name: commerce-os-v2
+
+x-logging: &foundation-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+    labels: "service,layer,runtime"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    labels:
+      service: postgres
+      layer: state
+      runtime: foundation
+    logging: *foundation-logging
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-commerce_os}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-commerce_os_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-commerce_os}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-commerce_os} -d $${POSTGRES_DB:-commerce_os}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - commerce-os-network
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    labels:
+      service: redis
+      layer: cache-queue-event-bus
+      runtime: foundation
+    logging: *foundation-logging
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - commerce-os-network
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.13
+    restart: unless-stopped
+    labels:
+      service: meilisearch
+      layer: search-index
+      runtime: foundation
+    logging: *foundation-logging
+    environment:
+      MEILI_ENV: ${MEILI_ENV:-development}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-commerce_os_meili_dev_key}
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meilisearch-data:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7700/health | grep -q available"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - commerce-os-network
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    labels:
+      service: minio
+      layer: object-storage
+      runtime: foundation
+    logging: *foundation-logging
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-commerce_os_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-commerce_os_minio_dev_password}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - commerce-os-network
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    labels:
+      service: minio-init
+      layer: bootstrap
+      runtime: foundation
+    logging: *foundation-logging
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-commerce_os_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-commerce_os_minio_dev_password}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        mc alias set commerce-os http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        while read -r bucket; do
+          [ -z "$${bucket}" ] && continue
+          mc mb --ignore-existing "commerce-os/$${bucket}"
+        done < /foundation-buckets.txt
+    volumes:
+      - ./infra/minio/buckets.txt:/foundation-buckets.txt:ro
+    networks:
+      - commerce-os-network
+
+  odoo:
+    image: ${ODOO_IMAGE:-odoo:18.0}
+    restart: unless-stopped
+    labels:
+      service: odoo
+      layer: erp-engine
+      runtime: foundation
+    logging: *foundation-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HOST: postgres
+      USER: ${ODOO_DB_USER:-commerce_os}
+      PASSWORD: ${ODOO_DB_PASSWORD:-commerce_os_dev_password}
+      ODOO_RC: /etc/odoo/odoo.conf
+    command:
+      - odoo
+      - --config=/etc/odoo/odoo.conf
+      - --database=${ODOO_DB_NAME:-commerce_os_odoo}
+      - --without-demo=all
+      - --init=${ODOO_INIT_MODULES:-account,account_accountant,sale_management,purchase,stock,crm,hr,mrp,point_of_sale,website_sale,l10n_tr}
+    volumes:
+      - odoo-data:/var/lib/odoo
+      - ./services/odoo/config/odoo.conf:/etc/odoo/odoo.conf:ro
+      - ./services/odoo/addons/custom:/mnt/custom-addons
+      - ./services/odoo/addons/enterprise:/mnt/enterprise-addons
+      - ./services/odoo/localization-packs:/mnt/localization-packs
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket; s=socket.create_connection(('127.0.0.1', 8069), 5); s.close()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks:
+      - commerce-os-network
+
+  medusa:
+    build:
+      context: .
+      dockerfile: infra/docker/node-service.Dockerfile
+      args:
+        WORKSPACE_PACKAGE: "@commerce-os/medusa"
+    restart: unless-stopped
+    labels:
+      service: medusa
+      layer: headless-commerce-engine
+      runtime: foundation
+    logging: *foundation-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: ${MEDUSA_PORT_INTERNAL:-9000}
+      DATABASE_URL: postgres://${POSTGRES_USER:-commerce_os}:${POSTGRES_PASSWORD:-commerce_os_dev_password}@postgres:5432/${MEDUSA_DB_NAME:-commerce_os_medusa}?ssl_mode=disable
+      REDIS_URL: redis://redis:6379
+      CACHE_REDIS_URL: redis://redis:6379/1
+      LOCKING_REDIS_URL: redis://redis:6379/2
+      MEDUSA_ADMIN_DISABLED: "true"
+      JWT_SECRET: ${MEDUSA_JWT_SECRET:-commerce_os_medusa_jwt_dev_secret}
+      COOKIE_SECRET: ${MEDUSA_COOKIE_SECRET:-commerce_os_medusa_cookie_dev_secret}
+      STORE_CORS: ${STORE_CORS:-http://localhost:3004}
+      ADMIN_CORS: ${ADMIN_CORS:-http://localhost:3001}
+      AUTH_CORS: ${AUTH_CORS:-http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005}
+    command: ["sh", "-c", "pnpm --filter @commerce-os/medusa runtime"]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:9000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks:
+      - commerce-os-network
+
+  gateway-api:
+    build:
+      context: .
+      dockerfile: infra/docker/node-service.Dockerfile
+      args:
+        WORKSPACE_PACKAGE: "@commerce-os/gateway-api"
+    restart: unless-stopped
+    labels:
+      service: gateway-api
+      layer: api-gateway
+      runtime: foundation
+    logging: *foundation-logging
+    environment:
+      PORT: 8080
+      NODE_ENV: development
+      GATEWAY_URL: http://gateway-api:8080
+      PLATFORM_POSTGRES_URL: postgres://${POSTGRES_USER:-commerce_os}:${POSTGRES_PASSWORD:-commerce_os_dev_password}@postgres:5432/${GATEWAY_DB_NAME:-commerce_os_gateway}
+      REDIS_URL: redis://redis:6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT_INTERNAL: 5432
+      REDIS_HOST: redis
+      REDIS_PORT_INTERNAL: 6379
+      MINIO_URL: http://minio:9000
+      MEILI_URL: http://meilisearch:7700
+      MEDUSA_URL: http://medusa:9000
+      ODOO_HOST: odoo
+      ODOO_PORT_INTERNAL: 8069
+      REALTIME_URL: http://realtime:8091
+      SEARCH_URL: http://search:8092
+      NOTIFICATION_URL: http://notification-engine:8094
+      AI_ENGINE_URL: http://ai-engine:8093
+      GATEWAY_RATE_LIMIT_WINDOW_MS: ${GATEWAY_RATE_LIMIT_WINDOW_MS:-60000}
+      GATEWAY_RATE_LIMIT_MAX_REQUESTS: ${GATEWAY_RATE_LIMIT_MAX_REQUESTS:-120}
+      AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-commerce-os-gateway}
+      AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-commerce-os-workspaces}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-commerce_os_gateway_jwt_dev_secret_change_before_prod}
+      GATEWAY_SERVICE_TOKEN: ${GATEWAY_SERVICE_TOKEN:-commerce_os_gateway_service_dev_token}
+      SECURE_COOKIE_DOMAIN: ${SECURE_COOKIE_DOMAIN:-localhost}
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+      search:
+        condition: service_healthy
+      medusa:
+        condition: service_healthy
+      odoo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - commerce-os-network
+
+  realtime:
+    build:
+      context: .
+      dockerfile: infra/docker/node-service.Dockerfile
+      args:
+        WORKSPACE_PACKAGE: "@commerce-os/realtime"
+    restart: unless-stopped
+    labels:
+      service: realtime
+      layer: event-fanout
+      runtime: foundation
+    logging: *foundation-logging
+    environment:
+      PORT: 8091
+      REDIS_URL: redis://redis:6379/3
+      AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-commerce-os-gateway}
+      AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-commerce-os-workspaces}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-commerce_os_gateway_jwt_dev_secret_change_before_prod}
+      GATEWAY_SERVICE_TOKEN: ${GATEWAY_SERVICE_TOKEN:-commerce_os_gateway_service_dev_token}
+    depends_on:
+      redis:
+        condition: service_healthy
+      gateway-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8091/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - commerce-os-network
+
+  search:
+    build:
+      context: .
+      dockerfile: infra/docker/node-service.Dockerfile
+      args:
+        WORKSPACE_PACKAGE: "@commerce-os/search"
+    restart: unless-stopped
+    labels:
+      service: search
+      layer: search-orchestration
+      runtime: foundation
+    logging: *foundation-logging
+    environment:
+      PORT: 8092
+      MEILI_HOST: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-commerce_os_meili_dev_key}
+    depends_on:
+      meilisearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8092/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - commerce-os-network
+
+  ai-engine:
+    build:
+      context: .
+      dockerfile: infra/docker/node-service.Dockerfile
+      args:
+        WORKSPACE_PACKAGE: "@commerce-os/ai-engine"
+    restart: unless-stopped
+    labels:
+      service: ai-engine
+      layer: ai-orchestration
+      runtime: foundation
+    logging: *foundation-logging
+    environment:
+      PORT: 8093
+    depends_on:
+      gateway-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8093/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - commerce-os-network
+
+  notification-engine:
+    build:
+      context: .
+      dockerfile: infra/docker/node-service.Dockerfile
+      args:
+        WORKSPACE_PACKAGE: "@commerce-os/notification-engine"
+    restart: unless-stopped
+    labels:
+      service: notification-engine
+      layer: notification-orchestration
+      runtime: foundation
+    logging: *foundation-logging
+    environment:
+      PORT: 8094
+      REDIS_URL: redis://redis:6379/4
+    depends_on:
+      redis:
+        condition: service_healthy
+      gateway-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8094/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - commerce-os-network
+
+  foundation-bootstrap:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    labels:
+      service: foundation-bootstrap
+      layer: bootstrap
+      runtime: foundation
+    logging: *foundation-logging
+    depends_on:
+      gateway-api:
+        condition: service_healthy
+      realtime:
+        condition: service_healthy
+      notification-engine:
+        condition: service_healthy
+      ai-engine:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/foundation-bootstrap.sh"]
+    volumes:
+      - ./infra/bootstrap/foundation-bootstrap.sh:/foundation-bootstrap.sh:ro
+    networks:
+      - commerce-os-network
+
+volumes:
+  postgres-data:
+  redis-data:
+  meilisearch-data:
+  minio-data:
+  odoo-data:
+
+networks:
+  commerce-os-network:
+    name: commerce-os-network
+    driver: bridge

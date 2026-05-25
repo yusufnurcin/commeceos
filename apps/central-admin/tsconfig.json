@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "allowJs": false,
+    "noEmit": true,
+    "incremental": true,
+    "baseUrl": "../..",
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@commerce-os/auth-core": ["packages/auth-core/src/index.ts"],
+      "@commerce-os/tenant-core": ["packages/tenant-core/src/index.ts"],
+      "@commerce-os/commerce-core": ["packages/commerce-core/src/index.ts"],
+      "@commerce-os/analytics-core": ["packages/analytics-core/src/index.ts"],
+      "@commerce-os/sync-core": ["packages/sync-core/src/index.ts"],
+      "@commerce-os/ui-system": ["packages/ui-system/src/index.ts"],
+      "@commerce-os/ui-system/globals.css": ["packages/ui-system/src/styles/globals.css"],
+      "@commerce-os/ui-system/tailwind-preset": ["packages/ui-system/tailwind-preset.ts"],
+      "@commerce-os/ui-system/utils": ["packages/ui-system/src/lib/utils.ts"],
+      "@commerce-os/ui-system/*": ["packages/ui-system/src/*"],
+      "@/*": ["apps/central-admin/src/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "next.config.ts", "src/**/*.ts", "src/**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}

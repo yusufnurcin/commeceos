@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@commerce-os/auth-core": ["packages/auth-core/src/index.ts"],
+      "@commerce-os/tenant-core": ["packages/tenant-core/src/index.ts"],
+      "@commerce-os/commerce-core": ["packages/commerce-core/src/index.ts"],
+      "@commerce-os/analytics-core": ["packages/analytics-core/src/index.ts"],
+      "@commerce-os/sync-core": ["packages/sync-core/src/index.ts"],
+      "@commerce-os/ui-system": ["packages/ui-system/src/index.ts"],
+      "@commerce-os/ui-system/globals.css": ["packages/ui-system/src/styles/globals.css"],
+      "@commerce-os/ui-system/tailwind-preset": ["packages/ui-system/tailwind-preset.ts"],
+      "@commerce-os/ui-system/utils": ["packages/ui-system/src/lib/utils.ts"],
+      "@commerce-os/ui-system/*": ["packages/ui-system/src/*"]
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@commerce-os/medusa",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "cross-env TS_NODE_PROJECT=tsconfig.json MEDUSA_ADMIN_DISABLED=true medusa develop --host 0.0.0.0",
+    "runtime": "cross-env TS_NODE_PROJECT=tsconfig.json MEDUSA_ADMIN_DISABLED=true MEDUSA_MIGRATION_MODE=true medusa db:migrate --execute-safe-links && cross-env TS_NODE_PROJECT=tsconfig.json MEDUSA_ADMIN_DISABLED=true medusa develop --host 0.0.0.0",
+    "build": "cross-env TS_NODE_PROJECT=tsconfig.json MEDUSA_ADMIN_DISABLED=true medusa build",
+    "start": "cross-env TS_NODE_PROJECT=tsconfig.json MEDUSA_ADMIN_DISABLED=true medusa start",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@commerce-os/commerce-core": "workspace:*",
+    "@medusajs/caching-redis": "2.12.2",
+    "@medusajs/framework": "2.12.2",
+    "@medusajs/medusa": "2.12.2",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@medusajs/cli": "2.12.2",
+    "cross-env": "7.0.3",
+    "ts-node": "10.9.2",
+    "tsx": "^4.19.2"
+  }
+}

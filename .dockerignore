@@ -1,0 +1,14 @@
+node_modules
+.pnpm-store
+.turbo
+.next
+.medusa
+dist
+build
+coverage
+*.log
+.git
+infra/data
+services/odoo/filestore
+services/odoo/addons/enterprise/*
+!services/odoo/addons/enterprise/.gitkeep
