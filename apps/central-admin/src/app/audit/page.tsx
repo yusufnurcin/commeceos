@@ -1,67 +1,62 @@
-"use client";
-
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { redirect } from "next/navigation";
+import { AdminShell, AuditMiniTimeline, DataToolbar, EmptyOperationalState, PageHeader, ServiceStatusCard } from "@/components/admin";
+import { findNavigationItemByHref, navigationManifest } from "@/config/navigation";
+import { gatewayFetchWithRefresh } from "@/lib/gateway-session";
+import { getCurrentSession, readJson } from "@/lib/runtime-data";
 
-type AuditEvent = {
-  readonly audit_id?: string;
-  readonly action?: string;
-  readonly result?: string;
-  readonly tenant_id?: string;
-  readonly workspace_id?: string;
-  readonly occurred_at?: string;
-};
+export default async function AuditPage() {
+  const session = await getCurrentSession();
+  if (!session?.principal) {
+    redirect("/login");
+  }
 
-export default function AuditPage() {
-  const router = useRouter();
-  const [events, setEvents] = useState<readonly AuditEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/audit", { cache: "no-store" })
-      .then(async (response) => {
-        if (response.status === 401) {
-          router.replace("/login");
-          return { events: [] };
-        }
-        return (await response.json()) as { readonly events?: readonly AuditEvent[] };
-      })
-      .then((payload) => setEvents(payload.events ?? []))
-      .finally(() => setLoading(false));
-  }, [router]);
+  const response = await gatewayFetchWithRefresh("/v1/audit/runtime", {}, { allowCookieMutation: false });
+  const payload = (await readJson(response)) as {
+    readonly events?: readonly {
+      readonly audit_id?: string;
+      readonly action?: string;
+      readonly result?: string;
+      readonly occurred_at?: string;
+      readonly tenant_id?: string;
+      readonly workspace_id?: string;
+    }[];
+  };
+  const item = findNavigationItemByHref("/security/audit") ?? navigationManifest[0]!;
 
   return (
-    <main className="detail-shell">
-      <nav className="breadcrumb">
-        <Link href="/">Runtime</Link>
-        <span>Audit Center</span>
-      </nav>
-      <header className="detail-header">
-        <div>
-          <h1>Audit Center</h1>
-          <p>Login, failed login, tenant_created, session_revoked ve runtime warning görünürlüğü.</p>
-        </div>
-        <mark>{loading ? "loading" : `${events.length} event`}</mark>
-      </header>
-      {events.length === 0 ? (
-        <div className="empty-state">
-          <strong>Audit olayı bekleniyor</strong>
-          <p>Gerçek auth veya provisioning olayı oluştuğunda bu liste dolacak.</p>
-        </div>
-      ) : (
-        <section className="audit-list">
-          {events.map((event) => (
-            <article className="audit-item" key={event.audit_id ?? `${event.action}-${event.occurred_at}`}>
-              <strong>{event.action}</strong>
-              <span>{event.result}</span>
-              <small>
-                {event.tenant_id ?? "tenant yok"} · {event.workspace_id ?? "workspace yok"} · {event.occurred_at}
-              </small>
-            </article>
-          ))}
-        </section>
-      )}
-    </main>
+    <AdminShell navigation={navigationManifest} principal={session.principal}>
+      <PageHeader
+        item={{
+          ...item,
+          label: "Audit Center",
+          href: "/audit",
+          description: "Giriş, başarısız giriş, tenant oluşturma, oturum kapatma ve önemli yönetim olaylarını izleyin."
+        }}
+        principal={session.principal}
+        actions={
+          <Link className="primary-link" href="/security/audit">
+            Güvenlik Audit Modülü
+          </Link>
+        }
+      />
+      <section className="dashboard-section">
+        <DataToolbar title="Son Audit Olayları" description="Fake kayıt yok; yalnızca gerçek auth ve provisioning olayları listelenir." />
+        {payload.events?.length ? (
+          <AuditMiniTimeline events={payload.events} />
+        ) : (
+          <EmptyOperationalState title="Audit olayı bekleniyor" description="Gerçek auth veya provisioning olayı oluştuğunda bu liste dolacak." />
+        )}
+      </section>
+      <section className="dashboard-section">
+        <DataToolbar title="Audit akışı" description="Bu alan teknik payload yerine okunabilir olay durumunu gösterir." />
+        <ServiceStatusCard
+          label="Audit kayıtları"
+          status={payload.events?.length ? "Kayıt var" : "Olay bekleniyor"}
+          detail={payload.events?.length ? "Son olaylar yukarıda listelendi." : "Login ve tenant işlemleri başladıkça burada olaylar görünür."}
+          tone={payload.events?.length ? "ready" : "waiting"}
+        />
+      </section>
+    </AdminShell>
   );
 }

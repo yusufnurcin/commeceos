@@ -6,6 +6,11 @@ import { useRouter } from "next/navigation";
 
 type JsonRecord = Record<string, unknown>;
 
+function value(source: JsonRecord | undefined, key: string, fallback: string) {
+  const next = source?.[key];
+  return typeof next === "string" && next ? next : fallback;
+}
+
 export default function TenantDetailPage({ params }: { readonly params: Promise<{ readonly id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -26,57 +31,80 @@ export default function TenantDetailPage({ params }: { readonly params: Promise<
   }, [id, router]);
 
   if (loading) {
-    return <main className="centered-runtime">Tenant runtime yükleniyor</main>;
+    return <main className="centered-runtime">Tenant bilgileri yükleniyor</main>;
   }
 
   const tenant = payload?.tenant as JsonRecord | undefined;
   const workspaces = (payload?.workspaces as readonly JsonRecord[] | undefined) ?? [];
   const auditEvents = (payload?.auditEvents as readonly JsonRecord[] | undefined) ?? [];
+  const namespaces = (payload?.namespaces as JsonRecord | undefined) ?? {};
+  const bridgeState = (payload?.bridgeState as JsonRecord | undefined) ?? {};
 
   return (
     <main className="detail-shell">
       <nav className="breadcrumb">
-        <Link href="/">Runtime</Link>
-        <Link href="/tenants/new">Tenant oluştur</Link>
-          <span>{id}</span>
+        <Link href="/">Ana Panel</Link>
+        <Link href="/tenants">Tenantlar</Link>
+        <span>{id}</span>
       </nav>
       <header className="detail-header">
         <div>
-          <h1>{String(tenant?.display_name ?? tenant?.tenant_id ?? id)}</h1>
+          <h1>{value(tenant, "display_name", value(tenant, "tenant_id", id))}</h1>
           <p>
-            {String(tenant?.lifecycle_state ?? "state yok")} · {String(tenant?.default_currency ?? "currency yok")} ·{" "}
-            {String(tenant?.timezone ?? "timezone yok")}
+            {value(tenant, "lifecycle_state", "Durum bekleniyor")} · {value(tenant, "default_currency", "Para birimi yok")} ·{" "}
+            {value(tenant, "timezone", "Zaman dilimi yok")}
           </p>
         </div>
-        <mark>{String(payload?.status ?? "unknown")}</mark>
+        <mark>{String(payload?.status ?? "Hazırlanıyor")}</mark>
       </header>
       <section className="runtime-section two-column">
         <article className="runtime-panel">
-          <h2>Workspace registry</h2>
+          <h2>Workspace listesi</h2>
           {workspaces.length === 0 ? (
-            <div className="empty-state">Workspace kaydı yok.</div>
+            <div className="empty-state">Bu tenant için workspace kaydı henüz oluşmadı.</div>
           ) : (
             workspaces.map((workspace) => (
               <div className="data-row" key={String(workspace.workspace_id)}>
-                <strong>{String(workspace.workspace_type)}</strong>
-                <span>{String(workspace.workspace_id)}</span>
+                <strong>{String(workspace.workspace_type ?? "Workspace")}</strong>
+                <span>{String(workspace.workspace_id ?? "Kimlik bekleniyor")}</span>
               </div>
             ))
           )}
         </article>
         <article className="runtime-panel">
-          <h2>Namespace ve bridge state</h2>
-          <pre>{JSON.stringify({ namespaces: payload?.namespaces, bridgeState: payload?.bridgeState }, null, 2)}</pre>
+          <h2>İzolasyon ve köprü durumu</h2>
+          <div className="operation-grid">
+            <div className="operation-card">
+              <strong>Depolama Alanı</strong>
+              <span>{String(namespaces.storage ?? "Storage alanı tenant provisioning ile oluşacak.")}</span>
+            </div>
+            <div className="operation-card">
+              <strong>Realtime Kanalı</strong>
+              <span>{String(namespaces.realtime ?? "Realtime kanalı tenant aktifleşince bağlanacak.")}</span>
+            </div>
+            <div className="operation-card">
+              <strong>Odoo Köprüsü</strong>
+              <span>{String(bridgeState.odoo ?? "Odoo mapping bekleniyor.")}</span>
+            </div>
+            <div className="operation-card">
+              <strong>Medusa Köprüsü</strong>
+              <span>{String(bridgeState.medusa ?? "Medusa bridge bekleniyor.")}</span>
+            </div>
+          </div>
         </article>
       </section>
       <section className="runtime-section">
-        <h2>Audit events</h2>
+        <h2>Audit olayları</h2>
         {auditEvents.length === 0 ? (
           <div className="empty-state">Bu tenant için audit olayı henüz oluşmadı.</div>
         ) : (
-          <div className="audit-list">
+          <div className="audit-mini-timeline">
             {auditEvents.map((event, index) => (
-              <pre key={index}>{JSON.stringify(event, null, 2)}</pre>
+              <article key={String(event.audit_id ?? index)}>
+                <strong>{String(event.action ?? "Tenant olayı")}</strong>
+                <span>{String(event.result ?? "Sonuç bekleniyor")}</span>
+                <small>{String(event.occurred_at ?? "Zaman bekleniyor")}</small>
+              </article>
             ))}
           </div>
         )}

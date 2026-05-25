@@ -81,7 +81,8 @@ export async function gatewayFetch(path: string, init: RequestInit = {}) {
   });
 }
 
-export async function refreshSession() {
+export async function refreshSession(options: { readonly allowCookieMutation?: boolean } = {}) {
+  const allowCookieMutation = options.allowCookieMutation ?? true;
   const session = await readSessionCookies();
   if (!session.refreshToken) {
     return false;
@@ -100,28 +101,36 @@ export async function refreshSession() {
   });
 
   if (!response.ok) {
-    await clearSessionCookies();
+    if (allowCookieMutation) {
+      await clearSessionCookies();
+    }
     return false;
   }
 
   const payload = (await response.json()) as { readonly accessToken: string; readonly refreshToken: string };
-  await setSessionCookies({
-    accessToken: payload.accessToken,
-    refreshToken: payload.refreshToken,
-    ...(session.sessionFingerprint ? { sessionFingerprint: session.sessionFingerprint } : {}),
-    ...(session.deviceId ? { deviceId: session.deviceId } : {})
-  });
+  if (allowCookieMutation) {
+    await setSessionCookies({
+      accessToken: payload.accessToken,
+      refreshToken: payload.refreshToken,
+      ...(session.sessionFingerprint ? { sessionFingerprint: session.sessionFingerprint } : {}),
+      ...(session.deviceId ? { deviceId: session.deviceId } : {})
+    });
+  }
   return true;
 }
 
-export async function gatewayFetchWithRefresh(path: string, init: RequestInit = {}) {
+export async function gatewayFetchWithRefresh(
+  path: string,
+  init: RequestInit = {},
+  options: { readonly allowCookieMutation?: boolean } = {}
+) {
   const response = await gatewayFetch(path, init);
   if (response.status !== 401) {
     return response;
   }
 
-  const refreshed = await refreshSession();
-  if (!refreshed) {
+  const refreshed = await refreshSession(options);
+  if (!refreshed || options.allowCookieMutation === false) {
     return response;
   }
 
