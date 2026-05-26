@@ -93,7 +93,37 @@ interface RefreshTokenRow {
   readonly family_status: string;
 }
 
+interface PlatformModuleRow {
+  readonly id: string;
+  readonly key: string;
+  readonly name: string;
+  readonly description: string;
+  readonly category: string;
+  readonly status: string;
+  readonly version: string;
+  readonly installed_version: string | null;
+  readonly is_core: boolean;
+  readonly is_enabled: boolean;
+  readonly requires_license: boolean;
+  readonly license_status: string;
+  readonly dependencies: unknown;
+  readonly capabilities: unknown;
+  readonly settings_schema: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
+interface PlatformModuleEventRow {
+  readonly id: string;
+  readonly module_id: string;
+  readonly event_type: string;
+  readonly actor_principal_id: string | null;
+  readonly payload: unknown;
+  readonly created_at: Date | string;
+}
+
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const moduleKeyPattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 
 export const publicAuthRuntimePaths = new Set([
   "/v1/auth/login",
@@ -149,6 +179,59 @@ function requireProtected(input: OperationalRouteInput) {
     reasons.push(...input.auth.reasons);
   }
   return reasons;
+}
+
+function isServicePrincipal(input: Pick<OperationalRouteInput, "auth">) {
+  return input.auth.mechanism === "service-token";
+}
+
+async function requireSuperAdmin(input: OperationalRouteInput) {
+  const reasons = requireProtected(input);
+  if (reasons.length > 0) {
+    return unauthorized(reasons);
+  }
+
+  if (isServicePrincipal(input)) {
+    return json(403, {
+      status: "super_admin_required",
+      reason: "service_principal_cannot_manage_user_scoped_modules"
+    });
+  }
+
+  if (!input.auth.roles.includes("super_admin")) {
+    return json(403, { status: "super_admin_required" });
+  }
+
+  if (!(await hasActiveJwtSession(input))) {
+    return unauthorized(["session_inactive"]);
+  }
+
+  return null;
+}
+
+function servicePrincipalResponse(input: OperationalRouteInput) {
+  return json(200, {
+    status: "ok",
+    principal: {
+      principalId: input.auth.principalId,
+      principalType: input.auth.principalType ?? "service-account",
+      roles: input.auth.roles,
+      permissions: input.auth.permissions,
+      tenantId: input.context.tenantId,
+      workspaceId: input.context.workspaceId
+    },
+    session: {
+      status: "service_principal",
+      message: "Service-token kalıcı kullanıcı oturumu üretmez."
+    }
+  });
+}
+
+function userSessionRequiredResponse() {
+  return json(403, {
+    status: "user_session_required",
+    message: "Bu endpoint kalıcı kullanıcı oturumu ister; service-token için session listesi sorgulanmaz."
+  });
 }
 
 async function hasActiveJwtSession(input: OperationalRouteInput) {
@@ -217,6 +300,71 @@ async function writeAudit(
       input.context.traceId
     ]
   );
+}
+
+function actorPrincipalId(input: Pick<OperationalRouteInput, "auth">) {
+  const principalId = input.auth.principalId;
+  return principalId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(principalId)
+    ? principalId
+    : null;
+}
+
+async function writeModuleEvent(
+  db: RuntimeDatabase | RuntimeDatabaseClient,
+  input: OperationalRouteInput,
+  moduleId: string,
+  eventType: string,
+  payload: JsonRecord = {}
+) {
+  await db.query(
+    `INSERT INTO platform_module_events (module_id, event_type, actor_principal_id, payload)
+     VALUES ($1, $2, $3::uuid, $4::jsonb)`,
+    [moduleId, eventType, actorPrincipalId(input), payload]
+  );
+  await writeAudit(db, input, eventType, "accepted", {
+    moduleId,
+    ...payload
+  });
+}
+
+function jsonObject(value: unknown) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function moduleDependencies(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && moduleKeyPattern.test(item));
+  }
+
+  if (jsonObject(value) && Array.isArray((value as { readonly modules?: unknown }).modules)) {
+    return (value as { readonly modules: readonly unknown[] }).modules.filter(
+      (item): item is string => typeof item === "string" && moduleKeyPattern.test(item)
+    );
+  }
+
+  return [];
+}
+
+function serializeModule(row: PlatformModuleRow) {
+  return {
+    id: row.id,
+    key: row.key,
+    name: row.name,
+    description: row.description,
+    category: row.category,
+    status: row.status,
+    version: row.version,
+    installedVersion: row.installed_version,
+    isCore: row.is_core,
+    isEnabled: row.is_enabled,
+    requiresLicense: row.requires_license,
+    licenseStatus: row.license_status,
+    dependencies: moduleDependencies(row.dependencies),
+    capabilities: row.capabilities,
+    settingsSchema: row.settings_schema,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
 }
 
 async function writeLoginActivity(
@@ -659,6 +807,10 @@ async function handleMe(input: OperationalRouteInput) {
     return unauthorized(reasons);
   }
 
+  if (isServicePrincipal(input)) {
+    return servicePrincipalResponse(input);
+  }
+
   try {
     if (!(await hasActiveJwtSession(input))) {
       return unauthorized(["session_inactive"]);
@@ -713,6 +865,10 @@ async function handleSessions(input: OperationalRouteInput) {
     return unauthorized(reasons);
   }
 
+  if (isServicePrincipal(input)) {
+    return userSessionRequiredResponse();
+  }
+
   try {
     const rows = await input.db.query(
       `SELECT session_id, tenant_id, workspace_id, device_id, mfa_verified, status, issued_at, expires_at, revoked_at
@@ -740,6 +896,9 @@ async function handleSessionRevoke(input: OperationalRouteInput) {
   const sessionId = asString(input.body.sessionId);
   if (reasons.length > 0) {
     return unauthorized(reasons);
+  }
+  if (isServicePrincipal(input)) {
+    return userSessionRequiredResponse();
   }
   if (!sessionId) {
     return json(400, { status: "session_id_required" });
@@ -791,6 +950,10 @@ async function handleActivity(input: OperationalRouteInput) {
     return unauthorized(reasons);
   }
 
+  if (isServicePrincipal(input)) {
+    return userSessionRequiredResponse();
+  }
+
   try {
     const rows = await input.db.query(
       `SELECT login_activity_id, tenant_id, workspace_id, device_id, result, risk_level, occurred_at
@@ -815,6 +978,313 @@ async function handleActivity(input: OperationalRouteInput) {
     }
     throw error;
   }
+}
+
+async function findModule(db: RuntimeDatabase | RuntimeDatabaseClient, key: string) {
+  return db.one<PlatformModuleRow>(
+    `SELECT id, key, name, description, category, status, version, installed_version, is_core, is_enabled,
+            requires_license, license_status, dependencies, capabilities, settings_schema, created_at, updated_at
+     FROM platform_modules
+     WHERE key = $1
+     LIMIT 1`,
+    [key]
+  );
+}
+
+function parseModulePath(pathname: string) {
+  if (pathname === "/v1/modules") {
+    return { collection: true } as const;
+  }
+
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "v1" || parts[1] !== "modules" || !parts[2]) {
+    return null;
+  }
+
+  const key = decodeURIComponent(parts[2]);
+  if (!moduleKeyPattern.test(key)) {
+    return null;
+  }
+
+  return {
+    collection: false,
+    key,
+    action: parts[3],
+    extra: parts.slice(4)
+  } as const;
+}
+
+async function handleModuleList(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const modules = await input.db.query<PlatformModuleRow>(
+      `SELECT id, key, name, description, category, status, version, installed_version, is_core, is_enabled,
+              requires_license, license_status, dependencies, capabilities, settings_schema, created_at, updated_at
+       FROM platform_modules
+       ORDER BY category, name`
+    );
+    return json(200, {
+      status: "ok",
+      modules: modules.map(serializeModule)
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "modules.list" });
+    }
+    throw error;
+  }
+}
+
+async function handleModuleDetail(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const moduleRow = await findModule(input.db, key);
+    if (!moduleRow) {
+      return json(404, { status: "module_not_found", key });
+    }
+
+    const settings = await input.db.query(
+      `SELECT id, tenant_id, settings, created_at, updated_at
+       FROM platform_module_settings
+       WHERE module_id = $1 AND ($2::text IS NULL OR tenant_id = $2)
+       ORDER BY updated_at DESC
+       LIMIT 20`,
+      [moduleRow.id, input.context.tenantId ?? null]
+    );
+
+    return json(200, {
+      status: "ok",
+      module: serializeModule(moduleRow),
+      settings
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "modules.detail" });
+    }
+    throw error;
+  }
+}
+
+async function handleModuleEvents(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const moduleRow = await findModule(input.db, key);
+    if (!moduleRow) {
+      return json(404, { status: "module_not_found", key });
+    }
+
+    const events = await input.db.query<PlatformModuleEventRow>(
+      `SELECT id, module_id, event_type, actor_principal_id, payload, created_at
+       FROM platform_module_events
+       WHERE module_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [moduleRow.id]
+    );
+
+    return json(200, {
+      status: "ok",
+      module: serializeModule(moduleRow),
+      events
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "modules.events" });
+    }
+    throw error;
+  }
+}
+
+async function findMissingDependencies(db: RuntimeDatabase | RuntimeDatabaseClient, dependencies: readonly string[]) {
+  if (dependencies.length === 0) {
+    return [];
+  }
+
+  const rows = await db.query<{ readonly key: string; readonly is_enabled: boolean }>(
+    `SELECT key, is_enabled FROM platform_modules WHERE key = ANY($1::text[])`,
+    [dependencies]
+  );
+  const enabled = new Set(rows.filter((row) => row.is_enabled).map((row) => row.key));
+  return dependencies.filter((dependency) => !enabled.has(dependency));
+}
+
+async function handleModuleEnable(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const moduleRow = await findModule(client, key);
+      if (!moduleRow) {
+        return json(404, { status: "module_not_found", key });
+      }
+
+      const missingDependencies = await findMissingDependencies(client, moduleDependencies(moduleRow.dependencies));
+      if (missingDependencies.length > 0) {
+        await writeModuleEvent(client, input, moduleRow.id, "module_dependency_blocked", { key, missingDependencies });
+        return json(409, {
+          status: "module_dependency_blocked",
+          key,
+          missingDependencies
+        });
+      }
+
+      const updated = await client.one<PlatformModuleRow>(
+        `UPDATE platform_modules
+         SET is_enabled = true,
+             status = 'active',
+             installed_version = COALESCE(installed_version, version),
+             updated_at = now()
+         WHERE key = $1
+         RETURNING id, key, name, description, category, status, version, installed_version, is_core, is_enabled,
+                   requires_license, license_status, dependencies, capabilities, settings_schema, created_at, updated_at`,
+        [key]
+      );
+
+      await writeModuleEvent(client, input, moduleRow.id, "module_enabled", { key });
+      return json(200, { status: "ok", module: updated ? serializeModule(updated) : serializeModule(moduleRow) });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "modules.enable" });
+    }
+    throw error;
+  }
+}
+
+async function handleModuleDisable(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const moduleRow = await findModule(client, key);
+      if (!moduleRow) {
+        return json(404, { status: "module_not_found", key });
+      }
+
+      if (moduleRow.is_core) {
+        await writeModuleEvent(client, input, moduleRow.id, "module_disable_blocked", { key, reason: "core_module" });
+        return json(409, {
+          status: "core_module_disable_blocked",
+          key
+        });
+      }
+
+      const updated = await client.one<PlatformModuleRow>(
+        `UPDATE platform_modules
+         SET is_enabled = false,
+             status = 'disabled',
+             updated_at = now()
+         WHERE key = $1
+         RETURNING id, key, name, description, category, status, version, installed_version, is_core, is_enabled,
+                   requires_license, license_status, dependencies, capabilities, settings_schema, created_at, updated_at`,
+        [key]
+      );
+
+      await writeModuleEvent(client, input, moduleRow.id, "module_disabled", { key });
+      return json(200, { status: "ok", module: updated ? serializeModule(updated) : serializeModule(moduleRow) });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "modules.disable" });
+    }
+    throw error;
+  }
+}
+
+async function handleModuleSettingsUpdate(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  const settings = input.body.settings;
+  if (!jsonObject(settings)) {
+    return json(422, {
+      status: "module_settings_invalid",
+      required: ["settings object"]
+    });
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const moduleRow = await findModule(client, key);
+      if (!moduleRow) {
+        return json(404, { status: "module_not_found", key });
+      }
+
+      const saved = await client.one(
+        `INSERT INTO platform_module_settings (module_id, tenant_id, settings)
+         VALUES ($1, $2, $3::jsonb)
+         ON CONFLICT (module_id, tenant_id)
+         DO UPDATE SET settings = excluded.settings, updated_at = now()
+         RETURNING id, tenant_id, settings, created_at, updated_at`,
+        [moduleRow.id, input.context.tenantId ?? null, settings]
+      );
+
+      await writeModuleEvent(client, input, moduleRow.id, "module_settings_updated", { key, tenantId: input.context.tenantId ?? null });
+      return json(200, {
+        status: "ok",
+        module: serializeModule(moduleRow),
+        settings: saved
+      });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "modules.settings" });
+    }
+    throw error;
+  }
+}
+
+async function handleModuleRoute(input: OperationalRouteInput) {
+  const parsed = parseModulePath(input.pathname);
+  if (!parsed) {
+    return json(404, { status: "module_route_not_found", path: input.pathname });
+  }
+
+  if (parsed.collection) {
+    return input.method === "GET" ? handleModuleList(input) : json(405, { status: "method_not_allowed", allowedMethods: ["GET"] });
+  }
+
+  if (!parsed.action && input.method === "GET") {
+    return handleModuleDetail(input, parsed.key);
+  }
+
+  if (parsed.action === "events" && input.method === "GET" && parsed.extra.length === 0) {
+    return handleModuleEvents(input, parsed.key);
+  }
+
+  if (parsed.action === "enable" && input.method === "POST" && parsed.extra.length === 0) {
+    return handleModuleEnable(input, parsed.key);
+  }
+
+  if (parsed.action === "disable" && input.method === "POST" && parsed.extra.length === 0) {
+    return handleModuleDisable(input, parsed.key);
+  }
+
+  if (parsed.action === "settings" && input.method === "PATCH" && parsed.extra.length === 0) {
+    return handleModuleSettingsUpdate(input, parsed.key);
+  }
+
+  return json(404, { status: "module_route_not_found", path: input.pathname });
 }
 
 async function handlePasswordResetRequest(input: OperationalRouteInput) {
@@ -1548,6 +2018,8 @@ function handleRuntimeVerification(input: OperationalRouteInput) {
 export function isOperationalRuntimeRoute(pathname: string) {
   return (
     pathname.startsWith("/v1/auth/") ||
+    pathname === "/v1/modules" ||
+    pathname.startsWith("/v1/modules/") ||
     pathname === "/v1/tenants" ||
     pathname.startsWith("/v1/tenants/") ||
     pathname === "/v1/tenants/registry" ||
@@ -1566,6 +2038,10 @@ export function isOperationalRuntimeRoute(pathname: string) {
 }
 
 export async function handleOperationalRoute(input: OperationalRouteInput): Promise<OperationalRouteResult> {
+  if (input.pathname === "/v1/modules" || input.pathname.startsWith("/v1/modules/")) {
+    return handleModuleRoute(input);
+  }
+
   if (input.method === "GET") {
     switch (input.pathname) {
       case "/v1/auth/me":

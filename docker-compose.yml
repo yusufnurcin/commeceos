@@ -205,6 +205,7 @@ services:
       dockerfile: infra/docker/node-service.Dockerfile
       args:
         WORKSPACE_PACKAGE: "@commerce-os/gateway-api"
+    command: ["sh", "-c", "pnpm --filter @commerce-os/gateway-api platform:bootstrap:direct && pnpm --filter @commerce-os/gateway-api dev"]
     restart: unless-stopped
     labels:
       service: gateway-api

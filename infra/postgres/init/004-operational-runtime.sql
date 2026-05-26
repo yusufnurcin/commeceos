@@ -121,6 +121,48 @@ CREATE TABLE IF NOT EXISTS ai_ops.operational_signals (
   CONSTRAINT ai_signal_status_check CHECK (status IN ('open', 'acknowledged', 'resolved'))
 );
 
+CREATE TABLE IF NOT EXISTS platform_modules (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  key text NOT NULL UNIQUE,
+  name text NOT NULL,
+  description text NOT NULL,
+  category text NOT NULL,
+  status text NOT NULL,
+  version text NOT NULL,
+  installed_version text,
+  is_core boolean NOT NULL DEFAULT false,
+  is_enabled boolean NOT NULL DEFAULT false,
+  requires_license boolean NOT NULL DEFAULT false,
+  license_status text NOT NULL DEFAULT 'not_required',
+  dependencies jsonb NOT NULL DEFAULT '[]'::jsonb,
+  capabilities jsonb NOT NULL DEFAULT '{}'::jsonb,
+  settings_schema jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT platform_modules_key_check CHECK (key ~ '^[a-z0-9][a-z0-9_-]{1,63}$'),
+  CONSTRAINT platform_modules_status_check CHECK (status IN ('installed', 'active', 'disabled', 'blocked')),
+  CONSTRAINT platform_modules_license_status_check CHECK (license_status IN ('not_required', 'valid', 'missing', 'expired'))
+);
+
+CREATE TABLE IF NOT EXISTS platform_module_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  module_id uuid NOT NULL REFERENCES platform_modules(id) ON DELETE CASCADE,
+  event_type text NOT NULL,
+  actor_principal_id uuid,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS platform_module_settings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  module_id uuid NOT NULL REFERENCES platform_modules(id) ON DELETE CASCADE,
+  tenant_id text,
+  settings jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE NULLS NOT DISTINCT (module_id, tenant_id)
+);
+
 INSERT INTO event_core.event_contracts
   (event_name, domain, current_version, minimum_supported_version, tenant_scoped, workspace_scoped, idempotency_required, audit_required, realtime_fanout, payload_schema_ref)
 VALUES
@@ -145,5 +187,8 @@ CREATE INDEX IF NOT EXISTS activity_stream_tenant_workspace_idx ON workspace_run
 CREATE INDEX IF NOT EXISTS notifications_tenant_workspace_idx ON workspace_runtime.notifications (tenant_id, workspace_id, created_at);
 CREATE INDEX IF NOT EXISTS audit_events_tenant_workspace_idx ON operational_audit.audit_events (tenant_id, workspace_id, occurred_at);
 CREATE INDEX IF NOT EXISTS ai_operational_signals_scope_idx ON ai_ops.operational_signals (tenant_id, workspace_id, created_at);
+CREATE INDEX IF NOT EXISTS platform_modules_category_status_idx ON platform_modules (category, status, is_enabled);
+CREATE INDEX IF NOT EXISTS platform_module_events_module_idx ON platform_module_events (module_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS platform_module_settings_module_idx ON platform_module_settings (module_id, tenant_id);
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_erp_bridge_engine_idx ON tenant_registry.tenant_erp_bridges (tenant_id, engine);
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_commerce_bridge_engine_idx ON tenant_registry.tenant_commerce_bridges (tenant_id, engine);

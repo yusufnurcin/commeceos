@@ -4,12 +4,250 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import pg from "pg";
+import type { PoolClient } from "pg";
 
 const { Pool } = pg;
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "../../..");
 const directOnly = process.argv.includes("--direct") || process.env.COMMERCE_OS_BOOTSTRAP_IN_CONTAINER === "1";
+
+const coreModules = [
+  {
+    key: "tenants",
+    name: "Tenant Yönetimi",
+    description: "Tenant registry, workspace provisioning ve tenant yaşam döngüsü.",
+    category: "platform",
+    enabled: true,
+    dependencies: [],
+    capabilities: ["tenant.registry", "tenant.provisioning", "workspace.registry"]
+  },
+  {
+    key: "marketplace",
+    name: "Marketplace",
+    description: "Satıcı ekosistemi, mağaza denetimi ve marketplace operasyonları.",
+    category: "marketplace",
+    enabled: false,
+    dependencies: ["tenants"],
+    capabilities: ["seller.registry", "marketplace.governance"]
+  },
+  {
+    key: "seller_kyc",
+    name: "Satıcı KYC",
+    description: "Satıcı belge, kimlik ve uygunluk denetimi.",
+    category: "marketplace",
+    enabled: false,
+    dependencies: ["marketplace", "security"],
+    capabilities: ["seller.kyc", "document.review"]
+  },
+  {
+    key: "catalog",
+    name: "Katalog",
+    description: "Ürün, kategori, varyant ve attribute yönetimi.",
+    category: "commerce",
+    enabled: false,
+    dependencies: ["medusa_commerce"],
+    capabilities: ["catalog.products", "catalog.categories", "catalog.import"]
+  },
+  {
+    key: "orders",
+    name: "Siparişler",
+    description: "Sipariş, iade, iptal ve fraud operasyonları.",
+    category: "commerce",
+    enabled: false,
+    dependencies: ["medusa_commerce"],
+    capabilities: ["orders.global", "returns", "refunds"]
+  },
+  {
+    key: "payments",
+    name: "Ödemeler",
+    description: "Ödeme sağlayıcıları ve ödeme akışı ayarları.",
+    category: "finance",
+    enabled: false,
+    dependencies: ["tenants"],
+    capabilities: ["payments.providers", "payments.capture"]
+  },
+  {
+    key: "wallets",
+    name: "Cüzdanlar",
+    description: "Satıcı, tenant, müşteri ve kurye bakiye yönetimi.",
+    category: "finance",
+    enabled: false,
+    dependencies: ["payments"],
+    capabilities: ["wallets.balance", "payouts.queue"]
+  },
+  {
+    key: "accounting",
+    name: "Muhasebe",
+    description: "Muhasebe mapping, cari hesaplar ve Odoo accounting bağlantısı.",
+    category: "accounting",
+    enabled: false,
+    dependencies: ["erp_odoo"],
+    capabilities: ["accounting.mapping", "accounting.reports"]
+  },
+  {
+    key: "tax",
+    name: "Vergi",
+    description: "Vergi oranları, vergi rejimleri ve bölgesel vergi kuralları.",
+    category: "accounting",
+    enabled: false,
+    dependencies: ["accounting"],
+    capabilities: ["tax.rules", "tax.regimes"]
+  },
+  {
+    key: "invoicing",
+    name: "Fatura",
+    description: "Fatura merkezi ve muhasebe belge akışı.",
+    category: "accounting",
+    enabled: false,
+    dependencies: ["accounting", "tax"],
+    capabilities: ["invoices.issue", "invoices.sync"]
+  },
+  {
+    key: "erp_odoo",
+    name: "ERP / Odoo",
+    description: "Odoo engine health, bridge jobs ve ERP bağlantı merkezi.",
+    category: "erp",
+    enabled: true,
+    dependencies: ["tenants"],
+    capabilities: ["odoo.health", "odoo.bridge_jobs"]
+  },
+  {
+    key: "medusa_commerce",
+    name: "Medusa Commerce",
+    description: "Medusa health, orchestration jobs ve commerce engine bağlantısı.",
+    category: "commerce",
+    enabled: true,
+    dependencies: ["tenants"],
+    capabilities: ["medusa.health", "medusa.orchestration_jobs"]
+  },
+  {
+    key: "logistics",
+    name: "Lojistik",
+    description: "Kargo, kurye, depo ve teslimat operasyonları.",
+    category: "operations",
+    enabled: false,
+    dependencies: ["orders"],
+    capabilities: ["shipments", "couriers", "warehouses"]
+  },
+  {
+    key: "support",
+    name: "Destek",
+    description: "Ticket, canlı destek ve destek kanalları.",
+    category: "support",
+    enabled: false,
+    dependencies: ["notifications"],
+    capabilities: ["tickets", "support.channels"]
+  },
+  {
+    key: "notifications",
+    name: "Bildirimler",
+    description: "E-posta, SMS, WhatsApp ve push bildirim hazırlığı.",
+    category: "communications",
+    enabled: false,
+    dependencies: ["tenants"],
+    capabilities: ["email", "sms", "whatsapp", "push"]
+  },
+  {
+    key: "marketing",
+    name: "Pazarlama",
+    description: "Kampanya, kupon, reklam, loyalty ve affiliate operasyonları.",
+    category: "growth",
+    enabled: false,
+    dependencies: [],
+    capabilities: ["campaigns", "coupons", "ads", "loyalty"]
+  },
+  {
+    key: "storefront_builder",
+    name: "Storefront Builder",
+    description: "Tema, sayfa, blok ve storefront düzenleme altyapısı.",
+    category: "design",
+    enabled: false,
+    dependencies: ["themes"],
+    capabilities: ["storefront.pages", "builder.blocks"]
+  },
+  {
+    key: "cms",
+    name: "CMS",
+    description: "Sayfa, içerik, medya, SEO ve yayınlama altyapısı.",
+    category: "content",
+    enabled: false,
+    dependencies: ["storefront_builder"],
+    capabilities: ["cms.pages", "seo"]
+  },
+  {
+    key: "ai",
+    name: "AI Operasyonları",
+    description: "AI sinyal, öneri ve operasyon yardımcı altyapısı.",
+    category: "ai",
+    enabled: true,
+    dependencies: ["tenants"],
+    capabilities: ["ai.signals", "ai.operations"]
+  },
+  {
+    key: "security",
+    name: "Güvenlik",
+    description: "Rol, yetki, oturum, audit ve güvenlik denetimi.",
+    category: "security",
+    enabled: true,
+    dependencies: [],
+    capabilities: ["roles", "permissions", "sessions", "audit"]
+  },
+  {
+    key: "integrations",
+    name: "Entegrasyonlar",
+    description: "API keys, webhooklar ve dış servis bağlantıları.",
+    category: "integrations",
+    enabled: false,
+    dependencies: ["security"],
+    capabilities: ["api_keys", "webhooks"]
+  },
+  {
+    key: "reports",
+    name: "Raporlama",
+    description: "Operasyon, satış, finans ve sistem raporları.",
+    category: "analytics",
+    enabled: false,
+    dependencies: ["tenants"],
+    capabilities: ["reports.global", "exports"]
+  },
+  {
+    key: "backup",
+    name: "Yedekleme",
+    description: "Tenant ve platform backup/restore operasyonları.",
+    category: "system",
+    enabled: false,
+    dependencies: ["tenants"],
+    capabilities: ["backup", "restore"]
+  },
+  {
+    key: "localization",
+    name: "Yerelleştirme",
+    description: "Ülke, dil, para birimi, timezone ve bölgesel ayarlar.",
+    category: "platform",
+    enabled: true,
+    dependencies: ["tenants"],
+    capabilities: ["countries", "currencies", "languages"]
+  },
+  {
+    key: "themes",
+    name: "Temalar",
+    description: "Tema registry, tema seçimi ve tenant tema hazırlığı.",
+    category: "design",
+    enabled: false,
+    dependencies: [],
+    capabilities: ["theme.registry", "theme.assignment"]
+  },
+  {
+    key: "plugins",
+    name: "Pluginler",
+    description: "Plugin registry, upload, activation ve extension noktaları.",
+    category: "extensions",
+    enabled: false,
+    dependencies: ["integrations"],
+    capabilities: ["plugin.registry", "plugin.activation"]
+  }
+] as const;
 
 function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -20,6 +258,43 @@ function hashPassword(password: string) {
   const salt = randomBytes(16).toString("base64url");
   const hash = pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("base64url");
   return `pbkdf2-sha256$${iterations}$${salt}$${hash}`;
+}
+
+async function seedCoreModules(client: PoolClient) {
+  for (const moduleDefinition of coreModules) {
+    await client.query(
+      `INSERT INTO platform_modules
+        (key, name, description, category, status, version, installed_version, is_core, is_enabled,
+         requires_license, license_status, dependencies, capabilities, settings_schema)
+       VALUES ($1, $2, $3, $4, $5, '1.0.0', '1.0.0', true, $6, false, 'not_required', $7::jsonb, $8::jsonb, $9::jsonb)
+       ON CONFLICT (key) DO UPDATE
+       SET name = excluded.name,
+           description = excluded.description,
+           category = excluded.category,
+           version = excluded.version,
+           is_core = true,
+           requires_license = excluded.requires_license,
+           dependencies = excluded.dependencies,
+           capabilities = excluded.capabilities,
+           settings_schema = excluded.settings_schema,
+           updated_at = now()`,
+      [
+        moduleDefinition.key,
+        moduleDefinition.name,
+        moduleDefinition.description,
+        moduleDefinition.category,
+        moduleDefinition.enabled ? "active" : "installed",
+        moduleDefinition.enabled,
+        JSON.stringify(moduleDefinition.dependencies),
+        JSON.stringify(moduleDefinition.capabilities),
+        JSON.stringify({
+          type: "object",
+          additionalProperties: true,
+          moduleKey: moduleDefinition.key
+        })
+      ]
+    );
+  }
 }
 
 function loadInitSql(fileName: string) {
@@ -160,6 +435,8 @@ async function runBootstrap() {
        )`,
       [principalId, centralTenantId, centralWorkspaceId]
     );
+
+    await seedCoreModules(client);
 
     await client.query(
       `INSERT INTO operational_audit.audit_events
