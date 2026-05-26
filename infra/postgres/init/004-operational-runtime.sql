@@ -163,6 +163,55 @@ CREATE TABLE IF NOT EXISTS platform_module_settings (
   UNIQUE NULLS NOT DISTINCT (module_id, tenant_id)
 );
 
+CREATE TABLE IF NOT EXISTS platform_themes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  key text NOT NULL UNIQUE,
+  name text NOT NULL,
+  description text NOT NULL,
+  industry text NOT NULL,
+  category text NOT NULL,
+  status text NOT NULL DEFAULT 'available',
+  version text NOT NULL,
+  is_core boolean NOT NULL DEFAULT true,
+  is_premium boolean NOT NULL DEFAULT false,
+  supports_dark_mode boolean NOT NULL DEFAULT true,
+  supports_mobile boolean NOT NULL DEFAULT true,
+  supports_rtl boolean NOT NULL DEFAULT false,
+  preview_image_url text,
+  capabilities jsonb NOT NULL DEFAULT '{}'::jsonb,
+  design_tokens jsonb NOT NULL DEFAULT '{}'::jsonb,
+  layout_presets jsonb NOT NULL DEFAULT '{}'::jsonb,
+  required_modules jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT platform_themes_key_check CHECK (key ~ '^[a-z0-9][a-z0-9_-]{1,63}$'),
+  CONSTRAINT platform_themes_status_check CHECK (status IN ('available', 'active', 'disabled', 'deprecated'))
+);
+
+CREATE TABLE IF NOT EXISTS platform_theme_assignments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id text NOT NULL REFERENCES tenant_registry.tenants(tenant_id) ON DELETE CASCADE,
+  theme_id uuid NOT NULL REFERENCES platform_themes(id) ON DELETE RESTRICT,
+  status text NOT NULL DEFAULT 'active',
+  assigned_by_principal_id uuid,
+  activated_at timestamptz,
+  settings jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id),
+  CONSTRAINT platform_theme_assignments_status_check CHECK (status IN ('active', 'inactive', 'staged'))
+);
+
+CREATE TABLE IF NOT EXISTS platform_theme_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  theme_id uuid REFERENCES platform_themes(id) ON DELETE SET NULL,
+  tenant_id text REFERENCES tenant_registry.tenants(tenant_id) ON DELETE SET NULL,
+  event_type text NOT NULL,
+  actor_principal_id uuid,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
 INSERT INTO event_core.event_contracts
   (event_name, domain, current_version, minimum_supported_version, tenant_scoped, workspace_scoped, idempotency_required, audit_required, realtime_fanout, payload_schema_ref)
 VALUES
@@ -190,5 +239,9 @@ CREATE INDEX IF NOT EXISTS ai_operational_signals_scope_idx ON ai_ops.operationa
 CREATE INDEX IF NOT EXISTS platform_modules_category_status_idx ON platform_modules (category, status, is_enabled);
 CREATE INDEX IF NOT EXISTS platform_module_events_module_idx ON platform_module_events (module_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS platform_module_settings_module_idx ON platform_module_settings (module_id, tenant_id);
+CREATE INDEX IF NOT EXISTS platform_themes_industry_category_idx ON platform_themes (industry, category, status);
+CREATE INDEX IF NOT EXISTS platform_theme_assignments_theme_idx ON platform_theme_assignments (theme_id, status);
+CREATE INDEX IF NOT EXISTS platform_theme_events_tenant_idx ON platform_theme_events (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS platform_theme_events_theme_idx ON platform_theme_events (theme_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_erp_bridge_engine_idx ON tenant_registry.tenant_erp_bridges (tenant_id, engine);
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_commerce_bridge_engine_idx ON tenant_registry.tenant_commerce_bridges (tenant_id, engine);

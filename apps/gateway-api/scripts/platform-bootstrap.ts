@@ -249,6 +249,99 @@ const coreModules = [
   }
 ] as const;
 
+const coreThemeSeeds = [
+  { key: "moda", name: "Moda", industry: "Moda", category: "retail", capabilities: ["catalog", "variants", "lookbook"], requiredModules: ["themes", "catalog"] },
+  { key: "elektronik", name: "Elektronik", industry: "Elektronik", category: "retail", capabilities: ["catalog", "comparison", "warranty"], requiredModules: ["themes", "catalog"] },
+  { key: "market", name: "Market", industry: "Market", category: "grocery", capabilities: ["catalog", "fast-delivery", "inventory"], requiredModules: ["themes", "catalog", "logistics"] },
+  { key: "restoran", name: "Restoran", industry: "Restoran", category: "food", capabilities: ["menu", "delivery", "reservation"], requiredModules: ["themes", "catalog", "orders"] },
+  { key: "kafe", name: "Kafe", industry: "Kafe", category: "food", capabilities: ["menu", "pickup", "loyalty"], requiredModules: ["themes", "catalog"] },
+  { key: "kozmetik", name: "Kozmetik", industry: "Kozmetik", category: "retail", capabilities: ["catalog", "bundles", "beauty-guides"], requiredModules: ["themes", "catalog"] },
+  { key: "mobilya", name: "Mobilya", industry: "Mobilya", category: "home", capabilities: ["catalog", "room-sets", "delivery-slots"], requiredModules: ["themes", "catalog", "logistics"] },
+  { key: "yapi_market", name: "Yapı Market", industry: "Yapı Market", category: "home", capabilities: ["catalog", "bulk-order", "warehouse"], requiredModules: ["themes", "catalog", "logistics"] },
+  { key: "otomotiv", name: "Otomotiv", industry: "Otomotiv", category: "automotive", capabilities: ["catalog", "lead-form", "service-booking"], requiredModules: ["themes", "catalog"] },
+  { key: "yedek_parca", name: "Yedek Parça", industry: "Yedek Parça", category: "automotive", capabilities: ["fitment", "catalog", "inventory"], requiredModules: ["themes", "catalog"] },
+  { key: "kitap", name: "Kitap", industry: "Kitap", category: "media", capabilities: ["catalog", "author-pages", "isbn"], requiredModules: ["themes", "catalog"] },
+  { key: "muzik", name: "Müzik", industry: "Müzik", category: "media", capabilities: ["catalog", "artist-pages", "digital-preview"], requiredModules: ["themes", "catalog"] },
+  { key: "sanatci_solist", name: "Sanatçı / Solist", industry: "Sanatçı / Solist", category: "media", capabilities: ["portfolio", "events", "booking"], requiredModules: ["themes", "cms"] },
+  { key: "egitim", name: "Eğitim", industry: "Eğitim", category: "education", capabilities: ["course-catalog", "applications", "content"], requiredModules: ["themes", "cms"] },
+  { key: "kurs", name: "Kurs", industry: "Kurs", category: "education", capabilities: ["course-catalog", "calendar", "booking"], requiredModules: ["themes", "cms"] },
+  { key: "saglik", name: "Sağlık", industry: "Sağlık", category: "health", capabilities: ["services", "appointment", "compliance-copy"], requiredModules: ["themes", "cms"] },
+  { key: "medikal", name: "Medikal", industry: "Medikal", category: "health", capabilities: ["catalog", "certificates", "b2b-request"], requiredModules: ["themes", "catalog"] },
+  { key: "eczane", name: "Eczane", industry: "Eczane", category: "health", capabilities: ["catalog", "prescription-note", "local-delivery"], requiredModules: ["themes", "catalog", "logistics"] },
+  { key: "spor", name: "Spor", industry: "Spor", category: "retail", capabilities: ["catalog", "teams", "training-content"], requiredModules: ["themes", "catalog"] },
+  { key: "supplement", name: "Supplement", industry: "Supplement", category: "health", capabilities: ["catalog", "subscriptions", "bundle-builder"], requiredModules: ["themes", "catalog"] },
+  { key: "kuyum", name: "Kuyum", industry: "Kuyum", category: "luxury", capabilities: ["catalog", "certificate", "appointment"], requiredModules: ["themes", "catalog"] },
+  { key: "cicek", name: "Çiçek", industry: "Çiçek", category: "gifts", capabilities: ["catalog", "same-day-delivery", "occasion-filter"], requiredModules: ["themes", "catalog", "logistics"] },
+  { key: "petshop", name: "Petshop", industry: "Petshop", category: "retail", capabilities: ["catalog", "subscriptions", "pet-profile"], requiredModules: ["themes", "catalog"] },
+  { key: "bebek", name: "Bebek", industry: "Bebek", category: "retail", capabilities: ["catalog", "age-filter", "gift-registry"], requiredModules: ["themes", "catalog"] },
+  { key: "oyuncak", name: "Oyuncak", industry: "Oyuncak", category: "retail", capabilities: ["catalog", "age-filter", "safety-badges"], requiredModules: ["themes", "catalog"] },
+  { key: "dijital_urun", name: "Dijital Ürün", industry: "Dijital Ürün", category: "digital", capabilities: ["digital-delivery", "license", "download"], requiredModules: ["themes", "catalog"] },
+  { key: "yazilim", name: "Yazılım", industry: "Yazılım", category: "digital", capabilities: ["plans", "docs", "license"], requiredModules: ["themes", "cms"] },
+  { key: "saas", name: "SaaS", industry: "SaaS", category: "digital", capabilities: ["plans", "trial", "feature-grid"], requiredModules: ["themes", "cms"] },
+  { key: "otel", name: "Otel", industry: "Otel", category: "travel", capabilities: ["rooms", "booking", "amenities"], requiredModules: ["themes", "cms"] },
+  { key: "turizm", name: "Turizm", industry: "Turizm", category: "travel", capabilities: ["tour-packages", "booking", "itinerary"], requiredModules: ["themes", "cms"] },
+  { key: "emlak", name: "Emlak", industry: "Emlak", category: "real-estate", capabilities: ["listings", "lead-form", "map"], requiredModules: ["themes", "cms"] },
+  { key: "arac_kiralama", name: "Araç Kiralama", industry: "Araç Kiralama", category: "automotive", capabilities: ["availability", "booking", "fleet"], requiredModules: ["themes", "cms"] },
+  { key: "etkinlik", name: "Etkinlik", industry: "Etkinlik", category: "events", capabilities: ["event-calendar", "registration", "sponsors"], requiredModules: ["themes", "cms"] },
+  { key: "bilet", name: "Bilet", industry: "Bilet", category: "events", capabilities: ["ticketing", "seat-map", "check-in"], requiredModules: ["themes", "orders"] },
+  { key: "hizmet_pazari", name: "Hizmet Pazarı", industry: "Hizmet Pazarı", category: "marketplace", capabilities: ["providers", "booking", "reviews"], requiredModules: ["themes", "marketplace"] },
+  { key: "kuafor", name: "Kuaför", industry: "Kuaför", category: "services", capabilities: ["services", "appointment", "staff"], requiredModules: ["themes", "cms"] },
+  { key: "guzellik_salonu", name: "Güzellik Salonu", industry: "Güzellik Salonu", category: "services", capabilities: ["services", "appointment", "packages"], requiredModules: ["themes", "cms"] },
+  { key: "klinik", name: "Klinik", industry: "Klinik", category: "health", capabilities: ["services", "appointment", "team"], requiredModules: ["themes", "cms"] },
+  { key: "hukuk", name: "Hukuk", industry: "Hukuk", category: "professional", capabilities: ["services", "case-intake", "team"], requiredModules: ["themes", "cms"] },
+  { key: "muhasebe", name: "Muhasebe", industry: "Muhasebe", category: "professional", capabilities: ["services", "consultation", "document-intake"], requiredModules: ["themes", "cms"] },
+  { key: "danismanlik", name: "Danışmanlık", industry: "Danışmanlık", category: "professional", capabilities: ["services", "booking", "case-studies"], requiredModules: ["themes", "cms"] },
+  { key: "tarim", name: "Tarım", industry: "Tarım", category: "b2b", capabilities: ["catalog", "seasonal", "quote-request"], requiredModules: ["themes", "catalog"] },
+  { key: "gida_uretici", name: "Gıda Üretici", industry: "Gıda Üretici", category: "b2b", capabilities: ["catalog", "certificates", "b2b-order"], requiredModules: ["themes", "catalog"] },
+  { key: "toptan_b2b", name: "Toptan / B2B", industry: "Toptan / B2B", category: "b2b", capabilities: ["bulk-order", "quote-request", "company-accounts"], requiredModules: ["themes", "catalog"] },
+  { key: "dropshipping", name: "Dropshipping", industry: "Dropshipping", category: "marketplace", capabilities: ["supplier-catalog", "sync", "fulfillment"], requiredModules: ["themes", "catalog", "integrations"] },
+  { key: "marketplace_genel", name: "Marketplace Genel", industry: "Marketplace Genel", category: "marketplace", capabilities: ["seller-stores", "multi-vendor", "commission"], requiredModules: ["themes", "marketplace"] },
+  { key: "sanat_galeri", name: "Sanat / Galeri", industry: "Sanat / Galeri", category: "media", capabilities: ["portfolio", "artist-pages", "inquiry"], requiredModules: ["themes", "cms"] },
+  { key: "sinema_medya", name: "Sinema / Medya", industry: "Sinema / Medya", category: "media", capabilities: ["catalog", "showcase", "screening"], requiredModules: ["themes", "cms"] },
+  { key: "influencer", name: "Influencer", industry: "Influencer", category: "media", capabilities: ["profile", "media-kit", "shop"], requiredModules: ["themes", "cms"] },
+  { key: "bagis_stk", name: "Bağış / STK", industry: "Bağış / STK", category: "nonprofit", capabilities: ["donation", "campaigns", "impact"], requiredModules: ["themes", "cms"] },
+  { key: "belediye_kurum", name: "Belediye / Kurum", industry: "Belediye / Kurum", category: "public", capabilities: ["announcements", "services", "forms"], requiredModules: ["themes", "cms"] },
+  { key: "lojistik", name: "Lojistik", industry: "Lojistik", category: "operations", capabilities: ["service-map", "quote-request", "tracking"], requiredModules: ["themes", "logistics"] },
+  { key: "kurye", name: "Kurye", industry: "Kurye", category: "operations", capabilities: ["delivery-zones", "tracking", "quote-request"], requiredModules: ["themes", "logistics"] },
+  { key: "depo", name: "Depo", industry: "Depo", category: "operations", capabilities: ["warehouse", "capacity", "b2b-intake"], requiredModules: ["themes", "logistics"] },
+  { key: "uretim", name: "Üretim", industry: "Üretim", category: "industrial", capabilities: ["capabilities", "quote-request", "certificates"], requiredModules: ["themes", "cms"] },
+  { key: "tekstil", name: "Tekstil", industry: "Tekstil", category: "industrial", capabilities: ["catalog", "b2b-order", "samples"], requiredModules: ["themes", "catalog"] },
+  { key: "ayakkabi", name: "Ayakkabı", industry: "Ayakkabı", category: "retail", capabilities: ["catalog", "size-guide", "variants"], requiredModules: ["themes", "catalog"] },
+  { key: "canta", name: "Çanta", industry: "Çanta", category: "retail", capabilities: ["catalog", "lookbook", "variants"], requiredModules: ["themes", "catalog"] },
+  { key: "aksesuar", name: "Aksesuar", industry: "Aksesuar", category: "retail", capabilities: ["catalog", "bundles", "gift"], requiredModules: ["themes", "catalog"] },
+  { key: "ev_yasam", name: "Ev Yaşam", industry: "Ev Yaşam", category: "home", capabilities: ["catalog", "room-sets", "inspiration"], requiredModules: ["themes", "catalog"] },
+  { key: "hediyelik", name: "Hediyelik", industry: "Hediyelik", category: "gifts", capabilities: ["catalog", "occasion-filter", "gift-note"], requiredModules: ["themes", "catalog"] },
+  { key: "dugun_organizasyon", name: "Düğün / Organizasyon", industry: "Düğün / Organizasyon", category: "events", capabilities: ["packages", "booking", "portfolio"], requiredModules: ["themes", "cms"] },
+  { key: "fotografci", name: "Fotoğrafçı", industry: "Fotoğrafçı", category: "creative", capabilities: ["portfolio", "booking", "packages"], requiredModules: ["themes", "cms"] },
+  { key: "matbaa", name: "Matbaa", industry: "Matbaa", category: "services", capabilities: ["quote-request", "product-options", "upload"], requiredModules: ["themes", "catalog"] },
+  { key: "ajans", name: "Ajans", industry: "Ajans", category: "creative", capabilities: ["portfolio", "services", "lead-form"], requiredModules: ["themes", "cms"] },
+  { key: "reklam", name: "Reklam", industry: "Reklam", category: "creative", capabilities: ["campaign-showcase", "services", "lead-form"], requiredModules: ["themes", "cms"] },
+  { key: "oyun", name: "Oyun", industry: "Oyun", category: "digital", capabilities: ["digital-catalog", "community", "download"], requiredModules: ["themes", "catalog"] },
+  { key: "hobi", name: "Hobi", industry: "Hobi", category: "retail", capabilities: ["catalog", "community", "guides"], requiredModules: ["themes", "catalog"] },
+  { key: "outdoor", name: "Outdoor", industry: "Outdoor", category: "retail", capabilities: ["catalog", "activity-filter", "guides"], requiredModules: ["themes", "catalog"] },
+  { key: "bisiklet", name: "Bisiklet", industry: "Bisiklet", category: "retail", capabilities: ["catalog", "service-booking", "fit-guide"], requiredModules: ["themes", "catalog"] },
+  { key: "denizcilik", name: "Denizcilik", industry: "Denizcilik", category: "industrial", capabilities: ["catalog", "quote-request", "service"], requiredModules: ["themes", "catalog"] },
+  { key: "sanayi", name: "Sanayi", industry: "Sanayi", category: "industrial", capabilities: ["b2b-catalog", "quote-request", "certificates"], requiredModules: ["themes", "catalog"] },
+  { key: "makine", name: "Makine", industry: "Makine", category: "industrial", capabilities: ["b2b-catalog", "spec-sheets", "quote-request"], requiredModules: ["themes", "catalog"] },
+  { key: "elektrik", name: "Elektrik", industry: "Elektrik", category: "industrial", capabilities: ["catalog", "spec-sheets", "quote-request"], requiredModules: ["themes", "catalog"] },
+  { key: "guvenlik_sistemleri", name: "Güvenlik Sistemleri", industry: "Güvenlik Sistemleri", category: "services", capabilities: ["catalog", "service-plans", "quote-request"], requiredModules: ["themes", "catalog"] },
+  { key: "temizlik", name: "Temizlik", industry: "Temizlik", category: "services", capabilities: ["services", "booking", "subscriptions"], requiredModules: ["themes", "cms"] },
+  { key: "ikinci_el", name: "İkinci El", industry: "İkinci El", category: "marketplace", capabilities: ["classifieds", "seller-profiles", "inspection"], requiredModules: ["themes", "marketplace"] },
+  { key: "acik_artirma", name: "Açık Artırma", industry: "Açık Artırma", category: "marketplace", capabilities: ["auction", "bidding", "watchlist"], requiredModules: ["themes", "marketplace"] },
+  { key: "abonelik_kutusu", name: "Abonelik Kutusu", industry: "Abonelik Kutusu", category: "subscription", capabilities: ["plans", "recurring", "box-builder"], requiredModules: ["themes", "payments"] },
+  { key: "premium_butik", name: "Premium Butik", industry: "Premium Butik", category: "luxury", capabilities: ["catalog", "lookbook", "appointment"], requiredModules: ["themes", "catalog"], isPremium: true },
+  { key: "yerel_esnaf", name: "Yerel Esnaf", industry: "Yerel Esnaf", category: "local", capabilities: ["catalog", "local-delivery", "store-info"], requiredModules: ["themes", "catalog"] },
+  { key: "global_export", name: "Global Export", industry: "Global Export", category: "b2b", capabilities: ["multi-currency", "quote-request", "export-docs"], requiredModules: ["themes", "localization", "catalog"] },
+  { key: "cok_dilli_magaza", name: "Çok Dilli Mağaza", industry: "Çok Dilli Mağaza", category: "global", capabilities: ["multi-language", "multi-currency", "locale-routing"], requiredModules: ["themes", "localization"] },
+  { key: "dijital_pazar", name: "Dijital Pazar", industry: "Dijital Pazar", category: "marketplace", capabilities: ["digital-catalog", "seller-stores", "download"], requiredModules: ["themes", "marketplace"] },
+  { key: "hizli_teslimat", name: "Hızlı Teslimat", industry: "Hızlı Teslimat", category: "operations", capabilities: ["fast-delivery", "tracking", "zones"], requiredModules: ["themes", "logistics"] },
+  { key: "super_app", name: "Süper App", industry: "Süper App", category: "platform", capabilities: ["multi-service", "wallet", "notifications"], requiredModules: ["themes", "payments", "notifications"] },
+  { key: "tenant_default", name: "Tenant Default", industry: "Tenant Default", category: "default", capabilities: ["tenant-ready", "responsive", "starter-layout"], requiredModules: ["themes"] },
+  { key: "enterprise_default", name: "Enterprise Default", industry: "Enterprise Default", category: "default", capabilities: ["enterprise", "governance", "multi-locale"], requiredModules: ["themes", "localization"] },
+  { key: "minimal_default", name: "Minimal Default", industry: "Minimal Default", category: "default", capabilities: ["minimal", "responsive", "fast-start"], requiredModules: ["themes"] },
+  { key: "luxury_default", name: "Luxury Default", industry: "Luxury Default", category: "default", capabilities: ["premium-layout", "lookbook", "appointment"], requiredModules: ["themes"], isPremium: true }
+] as const;
+
 function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -294,6 +387,86 @@ async function seedCoreModules(client: PoolClient) {
         })
       ]
     );
+  }
+}
+
+function themeDescription(theme: (typeof coreThemeSeeds)[number]) {
+  return `${theme.industry} sektörüne göre hazırlanmış Commerce OS tema manifesti. Bu kayıt görsel dosya üretmez; storefront ve tenant atama motorları için katalog tanımıdır.`;
+}
+
+function themeDesignTokens(theme: (typeof coreThemeSeeds)[number]) {
+  const premium = "isPremium" in theme && theme.isPremium;
+  return {
+    tokenSet: `theme.${theme.key}.v1`,
+    colorMode: premium ? "premium" : theme.category,
+    typography: theme.category === "luxury" ? "editorial" : "commerce",
+    density: ["b2b", "industrial", "operations"].includes(theme.category) ? "compact" : "comfortable"
+  };
+}
+
+function themeLayoutPresets(theme: (typeof coreThemeSeeds)[number]) {
+  const capabilities = theme.capabilities as readonly string[];
+  return {
+    homepage: theme.category === "default" ? "starter" : "industry-showcase",
+    listing: capabilities.includes("b2b-catalog") || capabilities.includes("bulk-order") ? "dense-catalog" : "visual-catalog",
+    detail: capabilities.includes("appointment") || capabilities.includes("booking") ? "conversion-with-booking" : "commerce-detail"
+  };
+}
+
+async function seedCoreThemes(client: PoolClient, actorPrincipalId: string) {
+  for (const theme of coreThemeSeeds) {
+    const result = await client.query<{ readonly id: string; readonly inserted: boolean }>(
+      `INSERT INTO platform_themes
+        (key, name, description, industry, category, status, version, is_core, is_premium,
+         supports_dark_mode, supports_mobile, supports_rtl, preview_image_url, capabilities,
+         design_tokens, layout_presets, required_modules)
+       VALUES ($1, $2, $3, $4, $5, 'available', '1.0.0', true, $6, true, true, false, NULL,
+               $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb)
+       ON CONFLICT (key) DO UPDATE
+       SET name = excluded.name,
+           description = excluded.description,
+           industry = excluded.industry,
+           category = excluded.category,
+           version = excluded.version,
+           is_core = true,
+           is_premium = excluded.is_premium,
+           supports_dark_mode = excluded.supports_dark_mode,
+           supports_mobile = excluded.supports_mobile,
+           supports_rtl = excluded.supports_rtl,
+           capabilities = excluded.capabilities,
+           design_tokens = excluded.design_tokens,
+           layout_presets = excluded.layout_presets,
+           required_modules = excluded.required_modules,
+           updated_at = now()
+       RETURNING id, (xmax = 0) AS inserted`,
+      [
+        theme.key,
+        theme.name,
+        themeDescription(theme),
+        theme.industry,
+        theme.category,
+        "isPremium" in theme && theme.isPremium === true,
+        JSON.stringify(theme.capabilities),
+        JSON.stringify(themeDesignTokens(theme)),
+        JSON.stringify(themeLayoutPresets(theme)),
+        JSON.stringify(theme.requiredModules)
+      ]
+    );
+
+    const row = result.rows[0];
+    if (row?.inserted) {
+      await client.query(
+        `INSERT INTO platform_theme_events (theme_id, tenant_id, event_type, actor_principal_id, payload)
+         VALUES ($1, NULL, 'theme_seeded', $2::uuid, $3::jsonb)`,
+        [row.id, actorPrincipalId, JSON.stringify({ key: theme.key, industry: theme.industry, category: theme.category })]
+      );
+      await client.query(
+        `INSERT INTO operational_audit.audit_events
+          (tenant_id, workspace_id, actor_id, actor_type, action, resource, result, payload, correlation_id, trace_id)
+         VALUES ('platform', 'central-admin', $1, 'system', 'theme_seeded', 'theme-registry', 'accepted', $2::jsonb, 'platform-bootstrap', 'platform-bootstrap')`,
+        [actorPrincipalId, JSON.stringify({ themeId: row.id, key: theme.key, industry: theme.industry })]
+      );
+    }
   }
 }
 
@@ -437,6 +610,7 @@ async function runBootstrap() {
     );
 
     await seedCoreModules(client);
+    await seedCoreThemes(client, principalId);
 
     await client.query(
       `INSERT INTO operational_audit.audit_events

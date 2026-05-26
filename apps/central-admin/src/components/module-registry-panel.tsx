@@ -61,9 +61,17 @@ function errorMessage(payload: Record<string, unknown>, fallback: string) {
   }
 }
 
-export function ModuleRegistryPanel({ initialModules }: { readonly initialModules: readonly PlatformModuleView[] }) {
+export function ModuleRegistryPanel({
+  highlightKey,
+  initialModules
+}: {
+  readonly highlightKey?: string | undefined;
+  readonly initialModules: readonly PlatformModuleView[];
+}) {
+  const normalizedHighlight = highlightKey?.trim().toLowerCase() ?? "";
+  const highlightedModule = initialModules.find((module) => module.key === normalizedHighlight);
   const [modules, setModules] = useState<readonly PlatformModuleView[]>(initialModules);
-  const [selectedKey, setSelectedKey] = useState(initialModules[0]?.key ?? "");
+  const [selectedKey, setSelectedKey] = useState(highlightedModule?.key ?? initialModules[0]?.key ?? "");
   const [events, setEvents] = useState<readonly ModuleEventView[]>([]);
   const [settingKey, setSettingKey] = useState("enabledScope");
   const [settingValue, setSettingValue] = useState("platform");
@@ -72,6 +80,16 @@ export function ModuleRegistryPanel({ initialModules }: { readonly initialModule
   const [error, setError] = useState<string | null>(null);
 
   const selectedModule = useMemo(() => modules.find((module) => module.key === selectedKey) ?? modules[0], [modules, selectedKey]);
+  const orderedModules = useMemo(() => {
+    if (!normalizedHighlight) {
+      return modules;
+    }
+    const highlighted = modules.find((module) => module.key === normalizedHighlight);
+    if (!highlighted) {
+      return modules;
+    }
+    return [highlighted, ...modules.filter((module) => module.key !== highlighted.key)];
+  }, [modules, normalizedHighlight]);
 
   async function refreshModules() {
     const response = await fetch("/api/modules", { cache: "no-store" });
@@ -158,11 +176,31 @@ export function ModuleRegistryPanel({ initialModules }: { readonly initialModule
 
       {message ? <p className="form-success">{message}</p> : null}
       {error ? <p className="form-error">{error}</p> : null}
+      {normalizedHighlight ? (
+        <div className="module-highlight-notice">
+          {highlightedModule ? (
+            <>
+              <strong>{highlightedModule.name} modülü öne çıkarıldı</strong>
+              <span>Tema ataması için bu modülü aktif etmeniz gerekiyor.</span>
+            </>
+          ) : (
+            <>
+              <strong>Modül bulunamadı</strong>
+              <span>{normalizedHighlight} anahtarı Module Registry içinde görünmüyor.</span>
+            </>
+          )}
+        </div>
+      ) : null}
 
       <div className="module-registry-layout">
         <div className="module-registry-list">
-          {modules.map((module) => (
-            <article className="module-registry-card" data-enabled={module.isEnabled ? "true" : "false"} key={module.key}>
+          {orderedModules.map((module) => (
+            <article
+              className="module-registry-card"
+              data-enabled={module.isEnabled ? "true" : "false"}
+              data-highlighted={module.key === normalizedHighlight ? "true" : "false"}
+              key={module.key}
+            >
               <header>
                 <div>
                   <h3>{module.name}</h3>

@@ -5,12 +5,13 @@ import { findNavigationItemByHref, navigationManifest } from "@/config/navigatio
 import { gatewayFetchWithRefresh } from "@/lib/gateway-session";
 import { getCurrentSession } from "@/lib/runtime-data";
 
-export default async function ModulesPage() {
+export default async function ModulesPage({ searchParams }: { readonly searchParams?: Promise<{ readonly highlight?: string }> }) {
   const session = await getCurrentSession();
   if (!session?.principal) {
     redirect("/login");
   }
 
+  const resolvedSearchParams = (await searchParams) ?? {};
   const item = findNavigationItemByHref("/modules") ?? navigationManifest[0]!;
   const response = await gatewayFetchWithRefresh("/v1/modules", {}, { allowCookieMutation: false });
   if (response.status === 401) {
@@ -32,7 +33,7 @@ export default async function ModulesPage() {
         }}
         principal={session.principal}
       />
-      <ModuleRegistryPanel initialModules={payload.modules ?? []} />
+      <ModuleRegistryPanel highlightKey={resolvedSearchParams.highlight} initialModules={payload.modules ?? []} />
     </AdminShell>
   );
 }

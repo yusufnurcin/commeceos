@@ -23,6 +23,9 @@ export default async function AuditPage() {
     }[];
   };
   const item = findNavigationItemByHref("/security/audit") ?? navigationManifest[0]!;
+  const events = payload.events ?? [];
+  const themeSeededCount = events.filter((event) => event.action === "theme_seeded").length;
+  const visibleEvents = events.filter((event) => event.action !== "theme_seeded");
 
   return (
     <AdminShell navigation={navigationManifest} principal={session.principal}>
@@ -42,19 +45,27 @@ export default async function AuditPage() {
       />
       <section className="dashboard-section">
         <DataToolbar title="Son Audit Olayları" description="Fake kayıt yok; yalnızca gerçek auth ve provisioning olayları listelenir." />
-        {payload.events?.length ? (
-          <AuditMiniTimeline events={payload.events} />
-        ) : (
+        {themeSeededCount ? (
+          <ServiceStatusCard
+            label="Theme Registry Seed"
+            status={`${themeSeededCount} tema seed edildi`}
+            detail="Global theme seed kayıtları listeyi doldurmaması için özetlendi."
+            tone="ready"
+          />
+        ) : null}
+        {visibleEvents.length ? (
+          <AuditMiniTimeline events={visibleEvents} />
+        ) : !events.length ? (
           <EmptyOperationalState title="Audit olayı bekleniyor" description="Gerçek auth veya provisioning olayı oluştuğunda bu liste dolacak." />
-        )}
+        ) : null}
       </section>
       <section className="dashboard-section">
         <DataToolbar title="Audit akışı" description="Bu alan teknik payload yerine okunabilir olay durumunu gösterir." />
         <ServiceStatusCard
           label="Audit kayıtları"
-          status={payload.events?.length ? "Kayıt var" : "Olay bekleniyor"}
-          detail={payload.events?.length ? "Son olaylar yukarıda listelendi." : "Login ve tenant işlemleri başladıkça burada olaylar görünür."}
-          tone={payload.events?.length ? "ready" : "waiting"}
+          status={events.length ? "Kayıt var" : "Olay bekleniyor"}
+          detail={events.length ? "Son olaylar yukarıda listelendi." : "Login ve tenant işlemleri başladıkça burada olaylar görünür."}
+          tone={events.length ? "ready" : "waiting"}
         />
       </section>
     </AdminShell>

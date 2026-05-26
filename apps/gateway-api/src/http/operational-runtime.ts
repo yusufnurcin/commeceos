@@ -122,6 +122,55 @@ interface PlatformModuleEventRow {
   readonly created_at: Date | string;
 }
 
+interface PlatformThemeRow {
+  readonly id: string;
+  readonly key: string;
+  readonly name: string;
+  readonly description: string;
+  readonly industry: string;
+  readonly category: string;
+  readonly status: string;
+  readonly version: string;
+  readonly is_core: boolean;
+  readonly is_premium: boolean;
+  readonly supports_dark_mode: boolean;
+  readonly supports_mobile: boolean;
+  readonly supports_rtl: boolean;
+  readonly preview_image_url: string | null;
+  readonly capabilities: unknown;
+  readonly design_tokens: unknown;
+  readonly layout_presets: unknown;
+  readonly required_modules: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
+interface PlatformThemeAssignmentRow {
+  readonly id: string;
+  readonly tenant_id: string;
+  readonly theme_id: string;
+  readonly status: string;
+  readonly assigned_by_principal_id: string | null;
+  readonly activated_at: Date | string | null;
+  readonly settings: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+  readonly theme_key?: string;
+  readonly theme_name?: string;
+  readonly theme_industry?: string;
+  readonly theme_category?: string;
+}
+
+interface PlatformThemeEventRow {
+  readonly id: string;
+  readonly theme_id: string | null;
+  readonly tenant_id: string | null;
+  readonly event_type: string;
+  readonly actor_principal_id: string | null;
+  readonly payload: unknown;
+  readonly created_at: Date | string;
+}
+
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const moduleKeyPattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 
@@ -200,6 +249,29 @@ async function requireSuperAdmin(input: OperationalRouteInput) {
 
   if (!input.auth.roles.includes("super_admin")) {
     return json(403, { status: "super_admin_required" });
+  }
+
+  if (!(await hasActiveJwtSession(input))) {
+    return unauthorized(["session_inactive"]);
+  }
+
+  return null;
+}
+
+async function requireThemeAccess(input: OperationalRouteInput, tenantId?: string) {
+  const reasons = requireProtected(input);
+  if (reasons.length > 0) {
+    return unauthorized(reasons);
+  }
+
+  if (isServicePrincipal(input)) {
+    return json(403, { status: "user_principal_required" });
+  }
+
+  const hasCentralAccess = input.auth.roles.includes("super_admin");
+  const hasTenantAccess = input.auth.roles.includes("tenant_admin") && (!tenantId || input.context.tenantId === tenantId);
+  if (!hasCentralAccess && !hasTenantAccess) {
+    return json(403, { status: "theme_access_denied" });
   }
 
   if (!(await hasActiveJwtSession(input))) {
@@ -327,6 +399,25 @@ async function writeModuleEvent(
   });
 }
 
+async function writeThemeEvent(
+  db: RuntimeDatabase | RuntimeDatabaseClient,
+  input: OperationalRouteInput,
+  eventType: string,
+  payload: JsonRecord = {},
+  scope: { readonly themeId?: string | null; readonly tenantId?: string | null } = {}
+) {
+  await db.query(
+    `INSERT INTO platform_theme_events (theme_id, tenant_id, event_type, actor_principal_id, payload)
+     VALUES ($1::uuid, $2, $3, $4::uuid, $5::jsonb)`,
+    [scope.themeId ?? null, scope.tenantId ?? null, eventType, actorPrincipalId(input), payload]
+  );
+  await writeAudit(db, input, eventType, "accepted", {
+    themeId: scope.themeId ?? null,
+    tenantId: scope.tenantId ?? null,
+    ...payload
+  });
+}
+
 function jsonObject(value: unknown) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -364,6 +455,61 @@ function serializeModule(row: PlatformModuleRow) {
     settingsSchema: row.settings_schema,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+function themeRequiredModules(value: unknown) {
+  return moduleDependencies(value);
+}
+
+function serializeTheme(row: PlatformThemeRow) {
+  return {
+    id: row.id,
+    key: row.key,
+    name: row.name,
+    description: row.description,
+    industry: row.industry,
+    category: row.category,
+    status: row.status,
+    version: row.version,
+    isCore: row.is_core,
+    isPremium: row.is_premium,
+    supportsDarkMode: row.supports_dark_mode,
+    supportsMobile: row.supports_mobile,
+    supportsRtl: row.supports_rtl,
+    previewImageUrl: row.preview_image_url,
+    capabilities: row.capabilities,
+    designTokens: row.design_tokens,
+    layoutPresets: row.layout_presets,
+    requiredModules: themeRequiredModules(row.required_modules),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeThemeAssignment(row: PlatformThemeAssignmentRow | undefined) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    themeId: row.theme_id,
+    status: row.status,
+    assignedByPrincipalId: row.assigned_by_principal_id,
+    activatedAt: row.activated_at,
+    settings: row.settings,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    theme: row.theme_key
+      ? {
+          key: row.theme_key,
+          name: row.theme_name,
+          industry: row.theme_industry,
+          category: row.theme_category
+        }
+      : undefined
   };
 }
 
@@ -1287,6 +1433,388 @@ async function handleModuleRoute(input: OperationalRouteInput) {
   return json(404, { status: "module_route_not_found", path: input.pathname });
 }
 
+async function findTheme(db: RuntimeDatabase | RuntimeDatabaseClient, key: string) {
+  return db.one<PlatformThemeRow>(
+    `SELECT id, key, name, description, industry, category, status, version, is_core, is_premium,
+            supports_dark_mode, supports_mobile, supports_rtl, preview_image_url, capabilities,
+            design_tokens, layout_presets, required_modules, created_at, updated_at
+     FROM platform_themes
+     WHERE key = $1
+     LIMIT 1`,
+    [key]
+  );
+}
+
+async function findTenant(db: RuntimeDatabase | RuntimeDatabaseClient, tenantId: string) {
+  return db.one<{ readonly tenant_id: string }>(
+    `SELECT tenant_id FROM tenant_registry.tenants WHERE tenant_id = $1 LIMIT 1`,
+    [tenantId]
+  );
+}
+
+async function getThemesModuleState(db: RuntimeDatabase | RuntimeDatabaseClient) {
+  const row = await findModule(db, "themes");
+  return row ? serializeModule(row) : null;
+}
+
+async function getThemeAssignment(db: RuntimeDatabase | RuntimeDatabaseClient, tenantId: string) {
+  return db.one<PlatformThemeAssignmentRow>(
+    `SELECT a.id, a.tenant_id, a.theme_id, a.status, a.assigned_by_principal_id, a.activated_at,
+            a.settings, a.created_at, a.updated_at,
+            t.key AS theme_key, t.name AS theme_name, t.industry AS theme_industry, t.category AS theme_category
+     FROM platform_theme_assignments a
+     JOIN platform_themes t ON t.id = a.theme_id
+     WHERE a.tenant_id = $1
+     LIMIT 1`,
+    [tenantId]
+  );
+}
+
+async function handleThemeList(input: OperationalRouteInput) {
+  const denied = await requireThemeAccess(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const [themes, moduleState] = await Promise.all([
+      input.db.query<PlatformThemeRow>(
+        `SELECT id, key, name, description, industry, category, status, version, is_core, is_premium,
+                supports_dark_mode, supports_mobile, supports_rtl, preview_image_url, capabilities,
+                design_tokens, layout_presets, required_modules, created_at, updated_at
+         FROM platform_themes
+         ORDER BY industry, name`
+      ),
+      getThemesModuleState(input.db)
+    ]);
+
+    return json(200, {
+      status: "ok",
+      themes: themes.map(serializeTheme),
+      module: moduleState,
+      moduleWarning: moduleState?.isEnabled === false ? "themes_module_disabled" : undefined
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "themes.list" });
+    }
+    throw error;
+  }
+}
+
+async function handleThemeIndustries(input: OperationalRouteInput) {
+  const denied = await requireThemeAccess(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const industries = await input.db.query<{ readonly industry: string; readonly count: number }>(
+      `SELECT industry, count(*)::int AS count
+       FROM platform_themes
+       GROUP BY industry
+       ORDER BY industry`
+    );
+    return json(200, { status: "ok", industries });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "themes.industries" });
+    }
+    throw error;
+  }
+}
+
+async function handleThemeDetail(input: OperationalRouteInput, key: string) {
+  const denied = await requireThemeAccess(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const theme = await findTheme(input.db, key);
+    if (!theme) {
+      return json(404, { status: "theme_not_found", key });
+    }
+
+    return json(200, {
+      status: "ok",
+      theme: serializeTheme(theme),
+      module: await getThemesModuleState(input.db)
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "themes.detail" });
+    }
+    throw error;
+  }
+}
+
+function parseThemePath(pathname: string) {
+  if (pathname === "/v1/themes") {
+    return { collection: true } as const;
+  }
+
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "v1" || parts[1] !== "themes") {
+    return null;
+  }
+
+  if (parts[2] === "industries" && parts.length === 3) {
+    return { industries: true } as const;
+  }
+
+  const key = parts[2] ? decodeURIComponent(parts[2]) : "";
+  if (!key || !moduleKeyPattern.test(key) || parts.length !== 3) {
+    return null;
+  }
+
+  return { collection: false, key } as const;
+}
+
+async function handleThemeRoute(input: OperationalRouteInput) {
+  const parsed = parseThemePath(input.pathname);
+  if (!parsed) {
+    return json(404, { status: "theme_route_not_found", path: input.pathname });
+  }
+
+  if ("collection" in parsed && parsed.collection) {
+    return input.method === "GET" ? handleThemeList(input) : json(405, { status: "method_not_allowed", allowedMethods: ["GET"] });
+  }
+
+  if ("industries" in parsed) {
+    return input.method === "GET" ? handleThemeIndustries(input) : json(405, { status: "method_not_allowed", allowedMethods: ["GET"] });
+  }
+
+  return input.method === "GET"
+    ? handleThemeDetail(input, parsed.key)
+    : json(405, { status: "method_not_allowed", allowedMethods: ["GET"] });
+}
+
+function parseTenantThemePath(pathname: string) {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "v1" || parts[1] !== "tenants" || !parts[2] || parts[3] !== "theme") {
+    return null;
+  }
+
+  return {
+    tenantId: decodeURIComponent(parts[2]),
+    action: parts[4],
+    extra: parts.slice(5)
+  } as const;
+}
+
+async function handleTenantThemeGet(input: OperationalRouteInput, tenantId: string) {
+  const denied = await requireThemeAccess(input, tenantId);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const tenant = await findTenant(input.db, tenantId);
+    if (!tenant) {
+      return json(404, { status: "tenant_not_found", tenantId });
+    }
+
+    const [assignment, events, moduleState] = await Promise.all([
+      getThemeAssignment(input.db, tenantId),
+      input.db.query<PlatformThemeEventRow>(
+        `SELECT id, theme_id, tenant_id, event_type, actor_principal_id, payload, created_at
+         FROM platform_theme_events
+         WHERE tenant_id = $1
+         ORDER BY created_at DESC
+         LIMIT 20`,
+        [tenantId]
+      ),
+      getThemesModuleState(input.db)
+    ]);
+
+    return json(200, {
+      status: "ok",
+      tenantId,
+      assignment: serializeThemeAssignment(assignment),
+      events,
+      module: moduleState,
+      emptyState: assignment ? undefined : emptyOperationalState("tenant.theme", "theme_assignment_not_found")
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "tenant.theme.get" });
+    }
+    throw error;
+  }
+}
+
+async function handleTenantThemeAssign(input: OperationalRouteInput, tenantId: string) {
+  const denied = await requireThemeAccess(input, tenantId);
+  if (denied) {
+    return denied;
+  }
+
+  const themeKey = asString(input.body.themeKey) ?? asString(input.body.key);
+  const settings = input.body.settings ?? {};
+  if (!themeKey || !moduleKeyPattern.test(themeKey) || !jsonObject(settings)) {
+    return json(422, { status: "theme_assignment_payload_invalid", required: ["themeKey", "settings object"] });
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const tenant = await findTenant(client, tenantId);
+      if (!tenant) {
+        return json(404, { status: "tenant_not_found", tenantId });
+      }
+
+      const theme = await findTheme(client, themeKey);
+      if (!theme) {
+        return json(404, { status: "theme_not_found", key: themeKey });
+      }
+
+      const requiredModules = Array.from(new Set(["themes", ...themeRequiredModules(theme.required_modules)]));
+      const missingModules = await findMissingDependencies(client, requiredModules);
+      if (missingModules.length > 0) {
+        await writeThemeEvent(
+          client,
+          input,
+          "theme_required_module_missing",
+          { themeKey, missingModules },
+          { themeId: theme.id, tenantId }
+        );
+        await writeThemeEvent(
+          client,
+          input,
+          "theme_assignment_blocked",
+          { themeKey, reason: "required_module_missing", missingModules },
+          { themeId: theme.id, tenantId }
+        );
+        return json(409, { status: "theme_required_module_missing", themeKey, tenantId, missingModules });
+      }
+
+      const assignment = await client.one<PlatformThemeAssignmentRow>(
+        `INSERT INTO platform_theme_assignments
+          (tenant_id, theme_id, status, assigned_by_principal_id, activated_at, settings)
+         VALUES ($1, $2, 'active', $3::uuid, now(), $4::jsonb)
+         ON CONFLICT (tenant_id) DO UPDATE
+         SET theme_id = excluded.theme_id,
+             status = 'active',
+             assigned_by_principal_id = excluded.assigned_by_principal_id,
+             activated_at = now(),
+             settings = excluded.settings,
+             updated_at = now()
+         RETURNING id, tenant_id, theme_id, status, assigned_by_principal_id, activated_at, settings, created_at, updated_at`,
+        [tenantId, theme.id, actorPrincipalId(input), settings]
+      );
+
+      await writeThemeEvent(client, input, "theme_assigned", { themeKey }, { themeId: theme.id, tenantId });
+      return json(200, {
+        status: "ok",
+        tenantId,
+        theme: serializeTheme(theme),
+        assignment: serializeThemeAssignment(assignment)
+      });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "tenant.theme.assign" });
+    }
+    throw error;
+  }
+}
+
+async function handleTenantThemeSettings(input: OperationalRouteInput, tenantId: string) {
+  const denied = await requireThemeAccess(input, tenantId);
+  if (denied) {
+    return denied;
+  }
+
+  const settings = input.body.settings;
+  if (!jsonObject(settings)) {
+    return json(422, { status: "theme_settings_invalid", required: ["settings object"] });
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const tenant = await findTenant(client, tenantId);
+      if (!tenant) {
+        return json(404, { status: "tenant_not_found", tenantId });
+      }
+
+      const current = await getThemeAssignment(client, tenantId);
+      if (!current) {
+        return json(404, { status: "theme_assignment_not_found", tenantId });
+      }
+
+      const updated = await client.one<PlatformThemeAssignmentRow>(
+        `UPDATE platform_theme_assignments
+         SET settings = $2::jsonb, updated_at = now()
+         WHERE tenant_id = $1
+         RETURNING id, tenant_id, theme_id, status, assigned_by_principal_id, activated_at, settings, created_at, updated_at`,
+        [tenantId, settings]
+      );
+
+      await writeThemeEvent(client, input, "theme_settings_updated", {}, { themeId: current.theme_id, tenantId });
+      return json(200, { status: "ok", tenantId, assignment: serializeThemeAssignment(updated) });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "tenant.theme.settings" });
+    }
+    throw error;
+  }
+}
+
+async function handleTenantThemeEvents(input: OperationalRouteInput, tenantId: string) {
+  const denied = await requireThemeAccess(input, tenantId);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const tenant = await findTenant(input.db, tenantId);
+    if (!tenant) {
+      return json(404, { status: "tenant_not_found", tenantId });
+    }
+
+    const events = await input.db.query<PlatformThemeEventRow>(
+      `SELECT id, theme_id, tenant_id, event_type, actor_principal_id, payload, created_at
+       FROM platform_theme_events
+       WHERE tenant_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [tenantId]
+    );
+    return json(200, { status: "ok", tenantId, events });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "tenant.theme.events" });
+    }
+    throw error;
+  }
+}
+
+async function handleTenantThemeRoute(input: OperationalRouteInput) {
+  const parsed = parseTenantThemePath(input.pathname);
+  if (!parsed || !parsed.tenantId) {
+    return json(404, { status: "tenant_theme_route_not_found", path: input.pathname });
+  }
+
+  if (!parsed.action && input.method === "GET") {
+    return handleTenantThemeGet(input, parsed.tenantId);
+  }
+
+  if (parsed.action === "assign" && input.method === "POST" && parsed.extra.length === 0) {
+    return handleTenantThemeAssign(input, parsed.tenantId);
+  }
+
+  if (parsed.action === "settings" && input.method === "PATCH" && parsed.extra.length === 0) {
+    return handleTenantThemeSettings(input, parsed.tenantId);
+  }
+
+  if (parsed.action === "events" && input.method === "GET" && parsed.extra.length === 0) {
+    return handleTenantThemeEvents(input, parsed.tenantId);
+  }
+
+  return json(404, { status: "tenant_theme_route_not_found", path: input.pathname });
+}
+
 async function handlePasswordResetRequest(input: OperationalRouteInput) {
   const email = asString(input.body.email)?.toLowerCase();
   if (!email) {
@@ -2020,6 +2548,8 @@ export function isOperationalRuntimeRoute(pathname: string) {
     pathname.startsWith("/v1/auth/") ||
     pathname === "/v1/modules" ||
     pathname.startsWith("/v1/modules/") ||
+    pathname === "/v1/themes" ||
+    pathname.startsWith("/v1/themes/") ||
     pathname === "/v1/tenants" ||
     pathname.startsWith("/v1/tenants/") ||
     pathname === "/v1/tenants/registry" ||
@@ -2040,6 +2570,14 @@ export function isOperationalRuntimeRoute(pathname: string) {
 export async function handleOperationalRoute(input: OperationalRouteInput): Promise<OperationalRouteResult> {
   if (input.pathname === "/v1/modules" || input.pathname.startsWith("/v1/modules/")) {
     return handleModuleRoute(input);
+  }
+
+  if (input.pathname === "/v1/themes" || input.pathname.startsWith("/v1/themes/")) {
+    return handleThemeRoute(input);
+  }
+
+  if (parseTenantThemePath(input.pathname)) {
+    return handleTenantThemeRoute(input);
   }
 
   if (input.method === "GET") {
