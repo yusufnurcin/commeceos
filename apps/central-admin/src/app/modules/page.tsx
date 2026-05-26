@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { AdminShell, PageHeader } from "@/components/admin";
 import { ModuleRegistryPanel, type PlatformModuleView } from "@/components/module-registry-panel";
 import { findNavigationItemByHref, navigationManifest } from "@/config/navigation";
@@ -32,6 +33,11 @@ export default async function ModulesPage({ searchParams }: { readonly searchPar
           description: "Platform modüllerini PostgreSQL-backed registry üzerinden yönetin; enable, disable, settings ve event akışları Gateway API ile çalışır."
         }}
         principal={session.principal}
+        actions={
+          <Link className="primary-link" href="/modules/plugins">
+            Plugin Registry
+          </Link>
+        }
       />
       <ModuleRegistryPanel highlightKey={resolvedSearchParams.highlight} initialModules={payload.modules ?? []} />
     </AdminShell>

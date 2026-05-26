@@ -342,6 +342,35 @@ const coreThemeSeeds = [
   { key: "luxury_default", name: "Luxury Default", industry: "Luxury Default", category: "default", capabilities: ["premium-layout", "lookbook", "appointment"], requiredModules: ["themes"], isPremium: true }
 ] as const;
 
+const corePluginSeeds = [
+  { key: "whatsapp_business", name: "WhatsApp Business", category: "communications", description: "WhatsApp Business mesajlaşma ve bildirim kanal manifesti.", requiredModules: ["plugins", "notifications", "integrations"], capabilities: ["whatsapp.messages", "templates", "delivery_status"], permissions: ["plugins.whatsapp.manage"] },
+  { key: "smtp_email", name: "SMTP E-posta", category: "communications", description: "SMTP e-posta gönderim bağlantısı ve doğrulama ayarları.", requiredModules: ["plugins", "notifications"], capabilities: ["email.smtp", "transactional_email"], permissions: ["plugins.email.manage"] },
+  { key: "sms_gateway", name: "SMS Gateway", category: "communications", description: "SMS sağlayıcı bağlantısı ve gönderim ayarları.", requiredModules: ["plugins", "notifications"], capabilities: ["sms.send", "delivery_status"], permissions: ["plugins.sms.manage"] },
+  { key: "push_notifications", name: "Push Bildirimleri", category: "communications", description: "Web ve mobil push bildirim kanal manifesti.", requiredModules: ["plugins", "notifications"], capabilities: ["push.web", "push.mobile"], permissions: ["plugins.push.manage"] },
+  { key: "stripe_payments", name: "Stripe Payments", category: "payments", description: "Stripe ödeme sağlayıcı bağlantısı ve ödeme akışı manifesti.", requiredModules: ["plugins", "payments"], capabilities: ["payments.stripe", "checkout", "webhooks"], permissions: ["plugins.payments.manage"] },
+  { key: "iyzico_payments", name: "iyzico Payments", category: "payments", description: "iyzico ödeme sağlayıcı bağlantısı ve Türkiye ödeme akışı manifesti.", requiredModules: ["plugins", "payments", "localization"], capabilities: ["payments.iyzico", "installments", "webhooks"], permissions: ["plugins.payments.manage"] },
+  { key: "paypal_payments", name: "PayPal Payments", category: "payments", description: "PayPal ödeme sağlayıcı bağlantısı ve global ödeme akışı manifesti.", requiredModules: ["plugins", "payments", "localization"], capabilities: ["payments.paypal", "checkout", "refunds"], permissions: ["plugins.payments.manage"] },
+  { key: "cargo_provider", name: "Kargo Sağlayıcı", category: "logistics", description: "Kargo sağlayıcı entegrasyonu, takip ve teslimat durum manifesti.", requiredModules: ["plugins", "logistics"], capabilities: ["cargo.labels", "shipment_tracking"], permissions: ["plugins.logistics.manage"] },
+  { key: "invoice_export", name: "Fatura Export", category: "accounting", description: "Fatura dışa aktarım ve muhasebe belge akışı manifesti.", requiredModules: ["plugins", "invoicing", "accounting"], capabilities: ["invoice.export", "accounting.documents"], permissions: ["plugins.accounting.manage"] },
+  { key: "xml_importer", name: "XML Importer", category: "catalog", description: "XML ürün içe aktarım bağlantısı ve şema mapping manifesti.", requiredModules: ["plugins", "catalog"], capabilities: ["catalog.xml_import", "mapping"], permissions: ["plugins.catalog.manage"] },
+  { key: "csv_importer", name: "CSV Importer", category: "catalog", description: "CSV ürün içe aktarım bağlantısı ve kolon mapping manifesti.", requiredModules: ["plugins", "catalog"], capabilities: ["catalog.csv_import", "mapping"], permissions: ["plugins.catalog.manage"] },
+  { key: "product_feed_google", name: "Google Product Feed", category: "marketing", description: "Google ürün feed çıkışı ve katalog dağıtım manifesti.", requiredModules: ["plugins", "catalog", "marketing"], capabilities: ["feeds.google", "merchant_center"], permissions: ["plugins.feed.manage"] },
+  { key: "product_feed_meta", name: "Meta Product Feed", category: "marketing", description: "Meta ürün feed çıkışı ve reklam katalog manifesti.", requiredModules: ["plugins", "catalog", "marketing"], capabilities: ["feeds.meta", "catalog_ads"], permissions: ["plugins.feed.manage"] },
+  { key: "analytics_connector", name: "Analytics Connector", category: "analytics", description: "Analytics event çıkışı ve raporlama bağlantı manifesti.", requiredModules: ["plugins", "reports"], capabilities: ["analytics.events", "reports.export"], permissions: ["plugins.analytics.manage"] },
+  { key: "ai_content_assistant", name: "AI İçerik Asistanı", category: "ai", description: "AI destekli içerik üretim ve operasyon yardımcısı manifesti.", requiredModules: ["plugins", "ai", "cms"], capabilities: ["ai.content", "cms.assist"], permissions: ["plugins.ai.manage"] },
+  { key: "ai_seo_assistant", name: "AI SEO Asistanı", category: "ai", description: "AI destekli SEO öneri ve içerik optimizasyon manifesti.", requiredModules: ["plugins", "ai", "cms"], capabilities: ["ai.seo", "seo.suggestions"], permissions: ["plugins.ai.manage"] },
+  { key: "fraud_rules", name: "Fraud Rules", category: "security", description: "Fraud kural motoru ve risk sinyal manifesti.", requiredModules: ["plugins", "security", "orders"], capabilities: ["fraud.rules", "risk.signals"], permissions: ["plugins.security.manage"] },
+  { key: "loyalty_points", name: "Loyalty Points", category: "marketing", description: "Sadakat puanı ve ödül kurgusu manifesti.", requiredModules: ["plugins", "marketing", "wallets"], capabilities: ["loyalty.points", "rewards"], permissions: ["plugins.marketing.manage"] },
+  { key: "affiliate_tracking", name: "Affiliate Tracking", category: "marketing", description: "Affiliate takip ve komisyon event manifesti.", requiredModules: ["plugins", "marketing"], capabilities: ["affiliate.links", "commission_tracking"], permissions: ["plugins.marketing.manage"] },
+  { key: "live_chat", name: "Canlı Destek", category: "support", description: "Canlı destek kanalı ve müşteri iletişim manifesti.", requiredModules: ["plugins", "support", "notifications"], capabilities: ["support.live_chat", "agent_presence"], permissions: ["plugins.support.manage"] },
+  { key: "chatbot", name: "Chatbot", category: "support", description: "Chatbot kanal manifesti ve destek otomasyonu bağlantısı.", requiredModules: ["plugins", "support", "ai"], capabilities: ["support.chatbot", "ai.responses"], permissions: ["plugins.support.manage"] },
+  { key: "print_center", name: "Print Center", category: "operations", description: "Etiket, belge ve çıktı operasyonları manifesti.", requiredModules: ["plugins", "orders"], capabilities: ["print.labels", "documents"], permissions: ["plugins.operations.manage"] },
+  { key: "barcode_qr_tools", name: "Barcode ve QR Tools", category: "operations", description: "Barkod, QR ve etiket araçları manifesti.", requiredModules: ["plugins", "catalog"], capabilities: ["barcode.generate", "qr.generate"], permissions: ["plugins.operations.manage"] },
+  { key: "odoo_accounting_bridge", name: "Odoo Accounting Bridge", category: "erp", description: "Odoo muhasebe köprüsü ve belge sync manifesti.", requiredModules: ["plugins", "erp_odoo", "accounting"], capabilities: ["odoo.accounting", "sync.jobs"], permissions: ["plugins.erp.manage"] },
+  { key: "medusa_catalog_bridge", name: "Medusa Catalog Bridge", category: "commerce", description: "Medusa katalog köprüsü ve ürün sync manifesti.", requiredModules: ["plugins", "medusa_commerce", "catalog"], capabilities: ["medusa.catalog", "sync.jobs"], permissions: ["plugins.commerce.manage"] },
+  { key: "medusa_order_bridge", name: "Medusa Order Bridge", category: "commerce", description: "Medusa sipariş köprüsü ve order sync manifesti.", requiredModules: ["plugins", "medusa_commerce", "orders"], capabilities: ["medusa.orders", "sync.jobs"], permissions: ["plugins.commerce.manage"] }
+] as const;
+
 function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -465,6 +494,89 @@ async function seedCoreThemes(client: PoolClient, actorPrincipalId: string) {
           (tenant_id, workspace_id, actor_id, actor_type, action, resource, result, payload, correlation_id, trace_id)
          VALUES ('platform', 'central-admin', $1, 'system', 'theme_seeded', 'theme-registry', 'accepted', $2::jsonb, 'platform-bootstrap', 'platform-bootstrap')`,
         [actorPrincipalId, JSON.stringify({ themeId: row.id, key: theme.key, industry: theme.industry })]
+      );
+    }
+  }
+}
+
+function pluginSettingsSchema(plugin: (typeof corePluginSeeds)[number]) {
+  return {
+    type: "object",
+    additionalProperties: true,
+    pluginKey: plugin.key,
+    fields: {
+      enabledScope: { type: "string", enum: ["platform", "tenant"] },
+      providerMode: { type: "string", enum: ["test", "live"] }
+    }
+  };
+}
+
+function pluginInstallManifest(plugin: (typeof corePluginSeeds)[number]) {
+  return {
+    manifestVersion: 1,
+    sourceType: "core_manifest",
+    entrypoint: `plugin://${plugin.key}`,
+    requiredModules: plugin.requiredModules,
+    permissions: plugin.permissions,
+    activation: {
+      mode: "registry-controlled",
+      uploadRequired: false
+    }
+  };
+}
+
+async function seedCorePlugins(client: PoolClient, actorPrincipalId: string) {
+  for (const plugin of corePluginSeeds) {
+    const result = await client.query<{ readonly id: string; readonly inserted: boolean }>(
+      `INSERT INTO platform_plugins
+        (key, name, description, category, status, version, installed_version, provider, source_type,
+         is_core, is_enabled, requires_license, license_status, required_modules, permissions,
+         capabilities, settings_schema, install_manifest)
+       VALUES ($1, $2, $3, $4, 'installed', '1.0.0', '1.0.0', 'commerce-os', 'core_manifest',
+               true, false, false, 'not_required', $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb)
+       ON CONFLICT (key) DO UPDATE
+       SET name = excluded.name,
+           description = excluded.description,
+           category = excluded.category,
+           version = excluded.version,
+           installed_version = excluded.installed_version,
+           provider = excluded.provider,
+           source_type = excluded.source_type,
+           is_core = true,
+           requires_license = excluded.requires_license,
+           license_status = excluded.license_status,
+           required_modules = excluded.required_modules,
+           permissions = excluded.permissions,
+           capabilities = excluded.capabilities,
+           settings_schema = excluded.settings_schema,
+           install_manifest = excluded.install_manifest,
+           updated_at = now()
+       RETURNING id, (xmax = 0) AS inserted`,
+      [
+        plugin.key,
+        plugin.name,
+        plugin.description,
+        plugin.category,
+        JSON.stringify(plugin.requiredModules),
+        JSON.stringify(plugin.permissions),
+        JSON.stringify(plugin.capabilities),
+        JSON.stringify(pluginSettingsSchema(plugin)),
+        JSON.stringify(pluginInstallManifest(plugin))
+      ]
+    );
+
+    const row = result.rows[0];
+    if (row?.inserted) {
+      await client.query(
+        `INSERT INTO platform_plugin_events (plugin_id, tenant_id, event_type, actor_principal_id, payload)
+         VALUES ($1, NULL, 'plugin_seeded', $2::uuid, $3::jsonb)`,
+        [row.id, actorPrincipalId, JSON.stringify({ key: plugin.key, category: plugin.category })]
+      );
+      await client.query(
+        `INSERT INTO operational_audit.audit_events
+          (tenant_id, workspace_id, actor_id, actor_type, action, resource, result, payload, correlation_id, trace_id)
+         VALUES ('platform', 'central-admin', $1, 'system', 'plugin_seeded', 'plugin-registry', 'accepted', $2::jsonb, 'platform-bootstrap', 'platform-bootstrap')`,
+        [actorPrincipalId, JSON.stringify({ pluginId: row.id, key: plugin.key, category: plugin.category })]
       );
     }
   }
@@ -611,6 +723,7 @@ async function runBootstrap() {
 
     await seedCoreModules(client);
     await seedCoreThemes(client, principalId);
+    await seedCorePlugins(client, principalId);
 
     await client.query(
       `INSERT INTO operational_audit.audit_events

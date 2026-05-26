@@ -171,6 +171,40 @@ interface PlatformThemeEventRow {
   readonly created_at: Date | string;
 }
 
+interface PlatformPluginRow {
+  readonly id: string;
+  readonly key: string;
+  readonly name: string;
+  readonly description: string;
+  readonly category: string;
+  readonly status: string;
+  readonly version: string;
+  readonly installed_version: string | null;
+  readonly provider: string;
+  readonly source_type: string;
+  readonly is_core: boolean;
+  readonly is_enabled: boolean;
+  readonly requires_license: boolean;
+  readonly license_status: string;
+  readonly required_modules: unknown;
+  readonly permissions: unknown;
+  readonly capabilities: unknown;
+  readonly settings_schema: unknown;
+  readonly install_manifest: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
+interface PlatformPluginEventRow {
+  readonly id: string;
+  readonly plugin_id: string | null;
+  readonly tenant_id: string | null;
+  readonly event_type: string;
+  readonly actor_principal_id: string | null;
+  readonly payload: unknown;
+  readonly created_at: Date | string;
+}
+
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const moduleKeyPattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 
@@ -418,6 +452,25 @@ async function writeThemeEvent(
   });
 }
 
+async function writePluginEvent(
+  db: RuntimeDatabase | RuntimeDatabaseClient,
+  input: OperationalRouteInput,
+  eventType: string,
+  payload: JsonRecord = {},
+  scope: { readonly pluginId?: string | null; readonly tenantId?: string | null } = {}
+) {
+  await db.query(
+    `INSERT INTO platform_plugin_events (plugin_id, tenant_id, event_type, actor_principal_id, payload)
+     VALUES ($1::uuid, $2, $3, $4::uuid, $5::jsonb)`,
+    [scope.pluginId ?? null, scope.tenantId ?? null, eventType, actorPrincipalId(input), payload]
+  );
+  await writeAudit(db, input, eventType, "accepted", {
+    pluginId: scope.pluginId ?? null,
+    tenantId: scope.tenantId ?? null,
+    ...payload
+  });
+}
+
 function jsonObject(value: unknown) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -510,6 +563,43 @@ function serializeThemeAssignment(row: PlatformThemeAssignmentRow | undefined) {
           category: row.theme_category
         }
       : undefined
+  };
+}
+
+function pluginRequiredModules(value: unknown) {
+  return moduleDependencies(value);
+}
+
+function pluginPermissions(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+  }
+  return [];
+}
+
+function serializePlugin(row: PlatformPluginRow) {
+  return {
+    id: row.id,
+    key: row.key,
+    name: row.name,
+    description: row.description,
+    category: row.category,
+    status: row.status,
+    version: row.version,
+    installedVersion: row.installed_version,
+    provider: row.provider,
+    sourceType: row.source_type,
+    isCore: row.is_core,
+    isEnabled: row.is_enabled,
+    requiresLicense: row.requires_license,
+    licenseStatus: row.license_status,
+    requiredModules: pluginRequiredModules(row.required_modules),
+    permissions: pluginPermissions(row.permissions),
+    capabilities: row.capabilities,
+    settingsSchema: row.settings_schema,
+    installManifest: row.install_manifest,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }
 
@@ -1431,6 +1521,321 @@ async function handleModuleRoute(input: OperationalRouteInput) {
   }
 
   return json(404, { status: "module_route_not_found", path: input.pathname });
+}
+
+async function findPlugin(db: RuntimeDatabase | RuntimeDatabaseClient, key: string) {
+  return db.one<PlatformPluginRow>(
+    `SELECT id, key, name, description, category, status, version, installed_version, provider, source_type,
+            is_core, is_enabled, requires_license, license_status, required_modules, permissions,
+            capabilities, settings_schema, install_manifest, created_at, updated_at
+     FROM platform_plugins
+     WHERE key = $1
+     LIMIT 1`,
+    [key]
+  );
+}
+
+function parsePluginPath(pathname: string) {
+  if (pathname === "/v1/plugins") {
+    return { collection: true } as const;
+  }
+
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "v1" || parts[1] !== "plugins" || !parts[2]) {
+    return null;
+  }
+
+  const key = decodeURIComponent(parts[2]);
+  if (!moduleKeyPattern.test(key)) {
+    return null;
+  }
+
+  return {
+    collection: false,
+    key,
+    action: parts[3],
+    extra: parts.slice(4)
+  } as const;
+}
+
+async function getPluginsModuleState(db: RuntimeDatabase | RuntimeDatabaseClient) {
+  const row = await findModule(db, "plugins");
+  return row ? serializeModule(row) : null;
+}
+
+async function handlePluginList(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const [plugins, moduleState] = await Promise.all([
+      input.db.query<PlatformPluginRow>(
+        `SELECT id, key, name, description, category, status, version, installed_version, provider, source_type,
+                is_core, is_enabled, requires_license, license_status, required_modules, permissions,
+                capabilities, settings_schema, install_manifest, created_at, updated_at
+         FROM platform_plugins
+         ORDER BY category, name`
+      ),
+      getPluginsModuleState(input.db)
+    ]);
+    return json(200, {
+      status: "ok",
+      plugins: plugins.map(serializePlugin),
+      module: moduleState
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "plugins.list" });
+    }
+    throw error;
+  }
+}
+
+async function handlePluginDetail(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const plugin = await findPlugin(input.db, key);
+    if (!plugin) {
+      return json(404, { status: "plugin_not_found", key });
+    }
+
+    const settings = await input.db.query(
+      `SELECT id, tenant_id, settings, created_at, updated_at
+       FROM platform_plugin_settings
+       WHERE plugin_id = $1 AND ($2::text IS NULL OR tenant_id = $2)
+       ORDER BY updated_at DESC
+       LIMIT 20`,
+      [plugin.id, input.context.tenantId ?? null]
+    );
+
+    return json(200, {
+      status: "ok",
+      plugin: serializePlugin(plugin),
+      settings
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "plugins.detail" });
+    }
+    throw error;
+  }
+}
+
+async function handlePluginEvents(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const plugin = await findPlugin(input.db, key);
+    if (!plugin) {
+      return json(404, { status: "plugin_not_found", key });
+    }
+
+    const events = await input.db.query<PlatformPluginEventRow>(
+      `SELECT id, plugin_id, tenant_id, event_type, actor_principal_id, payload, created_at
+       FROM platform_plugin_events
+       WHERE plugin_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [plugin.id]
+    );
+
+    return json(200, {
+      status: "ok",
+      plugin: serializePlugin(plugin),
+      events
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "plugins.events" });
+    }
+    throw error;
+  }
+}
+
+async function handlePluginActivate(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const plugin = await findPlugin(client, key);
+      if (!plugin) {
+        return json(404, { status: "plugin_not_found", key });
+      }
+
+      const requiredModules = pluginRequiredModules(plugin.required_modules);
+      const missingModules = await findMissingDependencies(client, requiredModules);
+      if (missingModules.length > 0) {
+        await writePluginEvent(
+          client,
+          input,
+          "plugin_required_module_missing",
+          { key, missingModules },
+          { pluginId: plugin.id, tenantId: input.context.tenantId ?? null }
+        );
+        await writePluginEvent(
+          client,
+          input,
+          "plugin_activation_blocked",
+          { key, reason: "required_module_missing", missingModules },
+          { pluginId: plugin.id, tenantId: input.context.tenantId ?? null }
+        );
+        return json(409, { status: "plugin_required_module_missing", key, missingModules });
+      }
+
+      const updated = await client.one<PlatformPluginRow>(
+        `UPDATE platform_plugins
+         SET is_enabled = true,
+             status = 'active',
+             installed_version = COALESCE(installed_version, version),
+             updated_at = now()
+         WHERE key = $1
+         RETURNING id, key, name, description, category, status, version, installed_version, provider, source_type,
+                   is_core, is_enabled, requires_license, license_status, required_modules, permissions,
+                   capabilities, settings_schema, install_manifest, created_at, updated_at`,
+        [key]
+      );
+
+      await writePluginEvent(client, input, "plugin_activated", { key }, { pluginId: plugin.id, tenantId: input.context.tenantId ?? null });
+      return json(200, { status: "ok", plugin: updated ? serializePlugin(updated) : serializePlugin(plugin) });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "plugins.activate" });
+    }
+    throw error;
+  }
+}
+
+async function handlePluginDeactivate(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const plugin = await findPlugin(client, key);
+      if (!plugin) {
+        return json(404, { status: "plugin_not_found", key });
+      }
+
+      const updated = await client.one<PlatformPluginRow>(
+        `UPDATE platform_plugins
+         SET is_enabled = false,
+             status = 'disabled',
+             updated_at = now()
+         WHERE key = $1
+         RETURNING id, key, name, description, category, status, version, installed_version, provider, source_type,
+                   is_core, is_enabled, requires_license, license_status, required_modules, permissions,
+                   capabilities, settings_schema, install_manifest, created_at, updated_at`,
+        [key]
+      );
+
+      await writePluginEvent(client, input, "plugin_deactivated", { key }, { pluginId: plugin.id, tenantId: input.context.tenantId ?? null });
+      return json(200, { status: "ok", plugin: updated ? serializePlugin(updated) : serializePlugin(plugin) });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "plugins.deactivate" });
+    }
+    throw error;
+  }
+}
+
+async function handlePluginSettingsUpdate(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  const settings = input.body.settings;
+  if (!jsonObject(settings)) {
+    return json(422, {
+      status: "plugin_settings_invalid",
+      required: ["settings object"]
+    });
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const plugin = await findPlugin(client, key);
+      if (!plugin) {
+        return json(404, { status: "plugin_not_found", key });
+      }
+
+      const saved = await client.one(
+        `INSERT INTO platform_plugin_settings (plugin_id, tenant_id, settings)
+         VALUES ($1, $2, $3::jsonb)
+         ON CONFLICT (plugin_id, tenant_id)
+         DO UPDATE SET settings = excluded.settings, updated_at = now()
+         RETURNING id, tenant_id, settings, created_at, updated_at`,
+        [plugin.id, input.context.tenantId ?? null, settings]
+      );
+
+      await writePluginEvent(
+        client,
+        input,
+        "plugin_settings_updated",
+        { key, tenantId: input.context.tenantId ?? null },
+        { pluginId: plugin.id, tenantId: input.context.tenantId ?? null }
+      );
+      return json(200, {
+        status: "ok",
+        plugin: serializePlugin(plugin),
+        settings: saved
+      });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "plugins.settings" });
+    }
+    throw error;
+  }
+}
+
+async function handlePluginRoute(input: OperationalRouteInput) {
+  const parsed = parsePluginPath(input.pathname);
+  if (!parsed) {
+    return json(404, { status: "plugin_route_not_found", path: input.pathname });
+  }
+
+  if (parsed.collection) {
+    return input.method === "GET" ? handlePluginList(input) : json(405, { status: "method_not_allowed", allowedMethods: ["GET"] });
+  }
+
+  if (!parsed.action && input.method === "GET") {
+    return handlePluginDetail(input, parsed.key);
+  }
+
+  if (parsed.action === "events" && input.method === "GET" && parsed.extra.length === 0) {
+    return handlePluginEvents(input, parsed.key);
+  }
+
+  if (parsed.action === "activate" && input.method === "POST" && parsed.extra.length === 0) {
+    return handlePluginActivate(input, parsed.key);
+  }
+
+  if (parsed.action === "deactivate" && input.method === "POST" && parsed.extra.length === 0) {
+    return handlePluginDeactivate(input, parsed.key);
+  }
+
+  if (parsed.action === "settings" && input.method === "PATCH" && parsed.extra.length === 0) {
+    return handlePluginSettingsUpdate(input, parsed.key);
+  }
+
+  return json(404, { status: "plugin_route_not_found", path: input.pathname });
 }
 
 async function findTheme(db: RuntimeDatabase | RuntimeDatabaseClient, key: string) {
@@ -2548,6 +2953,8 @@ export function isOperationalRuntimeRoute(pathname: string) {
     pathname.startsWith("/v1/auth/") ||
     pathname === "/v1/modules" ||
     pathname.startsWith("/v1/modules/") ||
+    pathname === "/v1/plugins" ||
+    pathname.startsWith("/v1/plugins/") ||
     pathname === "/v1/themes" ||
     pathname.startsWith("/v1/themes/") ||
     pathname === "/v1/tenants" ||
@@ -2570,6 +2977,10 @@ export function isOperationalRuntimeRoute(pathname: string) {
 export async function handleOperationalRoute(input: OperationalRouteInput): Promise<OperationalRouteResult> {
   if (input.pathname === "/v1/modules" || input.pathname.startsWith("/v1/modules/")) {
     return handleModuleRoute(input);
+  }
+
+  if (input.pathname === "/v1/plugins" || input.pathname.startsWith("/v1/plugins/")) {
+    return handlePluginRoute(input);
   }
 
   if (input.pathname === "/v1/themes" || input.pathname.startsWith("/v1/themes/")) {

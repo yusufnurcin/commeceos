@@ -1594,7 +1594,19 @@ mark[data-state="ok"] {
   padding: 16px;
 }
 
+.plugin-filter-bar {
+  align-items: end;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.62);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(260px, 1.4fr) minmax(180px, 0.6fr) auto;
+  padding: 16px;
+}
+
 .theme-filter-bar label,
+.plugin-filter-bar label,
 .runtime-panel label {
   color: var(--text);
   display: grid;
@@ -1604,6 +1616,8 @@ mark[data-state="ok"] {
 
 .theme-filter-bar select,
 .theme-filter-bar input,
+.plugin-filter-bar select,
+.plugin-filter-bar input,
 .runtime-panel select,
 .runtime-panel input {
   border: 1px solid rgba(148, 163, 184, 0.24);
@@ -1614,6 +1628,12 @@ mark[data-state="ok"] {
 }
 
 .theme-filter-bar span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding-bottom: 12px;
+}
+
+.plugin-filter-bar span {
   color: var(--muted);
   font-size: 0.9rem;
   padding-bottom: 12px;
@@ -1768,6 +1788,7 @@ mark[data-state="ok"] {
   .module-highlight-notice,
   .dependency-notice,
   .module-disabled-warning,
+  .plugin-filter-bar,
   .theme-filter-bar {
     grid-template-columns: 1fr;
   }

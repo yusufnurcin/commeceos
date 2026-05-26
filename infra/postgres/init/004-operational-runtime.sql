@@ -163,6 +163,53 @@ CREATE TABLE IF NOT EXISTS platform_module_settings (
   UNIQUE NULLS NOT DISTINCT (module_id, tenant_id)
 );
 
+CREATE TABLE IF NOT EXISTS platform_plugins (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  key text NOT NULL UNIQUE,
+  name text NOT NULL,
+  description text NOT NULL,
+  category text NOT NULL,
+  status text NOT NULL DEFAULT 'installed',
+  version text NOT NULL,
+  installed_version text,
+  provider text NOT NULL,
+  source_type text NOT NULL,
+  is_core boolean NOT NULL DEFAULT false,
+  is_enabled boolean NOT NULL DEFAULT false,
+  requires_license boolean NOT NULL DEFAULT false,
+  license_status text NOT NULL DEFAULT 'not_required',
+  required_modules jsonb NOT NULL DEFAULT '[]'::jsonb,
+  permissions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  capabilities jsonb NOT NULL DEFAULT '{}'::jsonb,
+  settings_schema jsonb NOT NULL DEFAULT '{}'::jsonb,
+  install_manifest jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT platform_plugins_key_check CHECK (key ~ '^[a-z0-9][a-z0-9_-]{1,63}$'),
+  CONSTRAINT platform_plugins_status_check CHECK (status IN ('installed', 'active', 'disabled', 'blocked')),
+  CONSTRAINT platform_plugins_license_status_check CHECK (license_status IN ('not_required', 'valid', 'missing', 'expired'))
+);
+
+CREATE TABLE IF NOT EXISTS platform_plugin_settings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  plugin_id uuid NOT NULL REFERENCES platform_plugins(id) ON DELETE CASCADE,
+  tenant_id text REFERENCES tenant_registry.tenants(tenant_id) ON DELETE CASCADE,
+  settings jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE NULLS NOT DISTINCT (plugin_id, tenant_id)
+);
+
+CREATE TABLE IF NOT EXISTS platform_plugin_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  plugin_id uuid REFERENCES platform_plugins(id) ON DELETE SET NULL,
+  tenant_id text REFERENCES tenant_registry.tenants(tenant_id) ON DELETE SET NULL,
+  event_type text NOT NULL,
+  actor_principal_id uuid,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS platform_themes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   key text NOT NULL UNIQUE,
@@ -239,6 +286,10 @@ CREATE INDEX IF NOT EXISTS ai_operational_signals_scope_idx ON ai_ops.operationa
 CREATE INDEX IF NOT EXISTS platform_modules_category_status_idx ON platform_modules (category, status, is_enabled);
 CREATE INDEX IF NOT EXISTS platform_module_events_module_idx ON platform_module_events (module_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS platform_module_settings_module_idx ON platform_module_settings (module_id, tenant_id);
+CREATE INDEX IF NOT EXISTS platform_plugins_category_status_idx ON platform_plugins (category, status, is_enabled);
+CREATE INDEX IF NOT EXISTS platform_plugin_settings_plugin_idx ON platform_plugin_settings (plugin_id, tenant_id);
+CREATE INDEX IF NOT EXISTS platform_plugin_events_plugin_idx ON platform_plugin_events (plugin_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS platform_plugin_events_tenant_idx ON platform_plugin_events (tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS platform_themes_industry_category_idx ON platform_themes (industry, category, status);
 CREATE INDEX IF NOT EXISTS platform_theme_assignments_theme_idx ON platform_theme_assignments (theme_id, status);
 CREATE INDEX IF NOT EXISTS platform_theme_events_tenant_idx ON platform_theme_events (tenant_id, created_at DESC);
