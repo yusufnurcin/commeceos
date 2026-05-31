@@ -291,10 +291,93 @@ interface PlatformProviderResiliencePolicyRow {
   readonly updated_at: Date | string;
 }
 
+interface MarketplaceSellerRow {
+  readonly id: string;
+  readonly seller_id: string;
+  readonly tenant_id: string | null;
+  readonly owner_principal_id: string | null;
+  readonly display_name: string;
+  readonly legal_name: string | null;
+  readonly seller_type: string;
+  readonly status: string;
+  readonly risk_status: string;
+  readonly country: string;
+  readonly currency: string;
+  readonly tax_number: string | null;
+  readonly phone: string | null;
+  readonly email: string | null;
+  readonly website: string | null;
+  readonly onboarding_stage: string;
+  readonly approved_at: Date | string | null;
+  readonly rejected_at: Date | string | null;
+  readonly suspended_at: Date | string | null;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+  readonly kyc_document_count?: number;
+  readonly approved_kyc_document_count?: number;
+}
+
+interface MarketplaceSellerApplicationRow {
+  readonly id: string;
+  readonly application_id: string;
+  readonly tenant_id: string | null;
+  readonly seller_id: string | null;
+  readonly applicant_principal_id: string | null;
+  readonly display_name: string;
+  readonly legal_name: string;
+  readonly seller_type: string;
+  readonly country: string;
+  readonly email: string;
+  readonly phone: string | null;
+  readonly tax_number: string | null;
+  readonly status: string;
+  readonly review_status: string;
+  readonly review_notes: string | null;
+  readonly reviewed_by_principal_id: string | null;
+  readonly reviewed_at: Date | string | null;
+  readonly submitted_at: Date | string | null;
+  readonly provider_context: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+  readonly kyc_document_count?: number;
+  readonly approved_kyc_document_count?: number;
+}
+
+interface MarketplaceSellerKycDocumentRow {
+  readonly id: string;
+  readonly seller_id: string | null;
+  readonly application_id: string | null;
+  readonly document_type: string;
+  readonly document_status: string;
+  readonly file_name: string;
+  readonly file_mime_type: string | null;
+  readonly file_size_bytes: number | string | null;
+  readonly storage_key: string | null;
+  readonly checksum: string | null;
+  readonly rejection_reason: string | null;
+  readonly reviewed_by_principal_id: string | null;
+  readonly reviewed_at: Date | string | null;
+  readonly expires_at: Date | string | null;
+  readonly metadata: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
+interface MarketplaceSellerEventRow {
+  readonly id: string;
+  readonly seller_id: string | null;
+  readonly application_id: string | null;
+  readonly event_type: string;
+  readonly actor_principal_id: string | null;
+  readonly payload: unknown;
+  readonly created_at: Date | string;
+}
+
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const moduleKeyPattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 const credentialFieldKeyPattern = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const marketplaceResourceIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,127}$/;
 
 export const publicAuthRuntimePaths = new Set([
   "/v1/auth/login",
@@ -583,6 +666,26 @@ async function writeIntegrationEvent(
     providerId: scope.providerId ?? null,
     credentialId: scope.credentialId ?? null,
     tenantId: scope.tenantId ?? null,
+    ...payload
+  });
+}
+
+async function writeMarketplaceSellerEvent(
+  db: RuntimeDatabase | RuntimeDatabaseClient,
+  input: OperationalRouteInput,
+  eventType: string,
+  payload: JsonRecord = {},
+  scope: { readonly sellerId?: string | null; readonly applicationId?: string | null } = {}
+) {
+  await db.query(
+    `INSERT INTO marketplace_seller_events
+      (seller_id, application_id, event_type, actor_principal_id, payload)
+     VALUES ($1, $2, $3, $4::uuid, $5::jsonb)`,
+    [scope.sellerId ?? null, scope.applicationId ?? null, eventType, actorPrincipalId(input), payload]
+  );
+  await writeAudit(db, input, eventType, "accepted", {
+    sellerId: scope.sellerId ?? null,
+    applicationId: scope.applicationId ?? null,
     ...payload
   });
 }
@@ -879,6 +982,84 @@ function serializeIntegrationProvider(
     credentialCount: extra.credentials?.length ?? 0,
     health: serializeIntegrationHealth(extra.health),
     resiliencePolicy: serializeProviderResiliencePolicy(extra.policy),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeMarketplaceSeller(row: MarketplaceSellerRow) {
+  return {
+    id: row.id,
+    sellerId: row.seller_id,
+    tenantId: row.tenant_id,
+    ownerPrincipalId: row.owner_principal_id,
+    displayName: row.display_name,
+    legalName: row.legal_name,
+    sellerType: row.seller_type,
+    status: row.status,
+    riskStatus: row.risk_status,
+    country: row.country,
+    currency: row.currency,
+    taxNumber: row.tax_number,
+    phone: row.phone,
+    email: row.email,
+    website: row.website,
+    onboardingStage: row.onboarding_stage,
+    approvedAt: row.approved_at,
+    rejectedAt: row.rejected_at,
+    suspendedAt: row.suspended_at,
+    kycDocumentCount: Number(row.kyc_document_count ?? 0),
+    approvedKycDocumentCount: Number(row.approved_kyc_document_count ?? 0),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeMarketplaceSellerApplication(row: MarketplaceSellerApplicationRow) {
+  return {
+    id: row.id,
+    applicationId: row.application_id,
+    tenantId: row.tenant_id,
+    sellerId: row.seller_id,
+    applicantPrincipalId: row.applicant_principal_id,
+    displayName: row.display_name,
+    legalName: row.legal_name,
+    sellerType: row.seller_type,
+    country: row.country,
+    email: row.email,
+    phone: row.phone,
+    taxNumber: row.tax_number,
+    status: row.status,
+    reviewStatus: row.review_status,
+    reviewNotes: row.review_notes,
+    reviewedByPrincipalId: row.reviewed_by_principal_id,
+    reviewedAt: row.reviewed_at,
+    submittedAt: row.submitted_at,
+    providerContext: row.provider_context,
+    kycDocumentCount: Number(row.kyc_document_count ?? 0),
+    approvedKycDocumentCount: Number(row.approved_kyc_document_count ?? 0),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeMarketplaceSellerKycDocument(row: MarketplaceSellerKycDocumentRow) {
+  return {
+    id: row.id,
+    sellerId: row.seller_id,
+    applicationId: row.application_id,
+    documentType: row.document_type,
+    documentStatus: row.document_status,
+    fileName: row.file_name,
+    fileMimeType: row.file_mime_type,
+    fileSizeBytes: row.file_size_bytes === null ? null : Number(row.file_size_bytes),
+    storageKey: row.storage_key,
+    checksum: row.checksum,
+    rejectionReason: row.rejection_reason,
+    reviewedByPrincipalId: row.reviewed_by_principal_id,
+    reviewedAt: row.reviewed_at,
+    expiresAt: row.expires_at,
+    metadata: row.metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -2734,6 +2915,781 @@ async function handleIntegrationRoute(input: OperationalRouteInput) {
   return json(404, { status: "integration_route_not_found", path: input.pathname });
 }
 
+async function getMarketplaceModuleState(db: RuntimeDatabase | RuntimeDatabaseClient) {
+  const row = await findModule(db, "marketplace");
+  return row ? serializeModule(row) : null;
+}
+
+async function requireMarketplaceMutation(input: OperationalRouteInput, db: RuntimeDatabase | RuntimeDatabaseClient = input.db) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  const moduleState = await getMarketplaceModuleState(db);
+  if (!moduleState?.isEnabled) {
+    await writeAudit(db, input, "marketplace_module_required", "rejected", { moduleKey: "marketplace" });
+    return json(409, {
+      status: "marketplace_module_required",
+      moduleKey: "marketplace",
+      message: "Satıcı onboarding işlemleri için marketplace modülünü Modül Merkezi üzerinden aktif edin."
+    });
+  }
+
+  return null;
+}
+
+function newMarketplaceResourceId(prefix: "seller" | "application") {
+  return `${prefix}_${randomUUID().replace(/-/g, "")}`;
+}
+
+function validEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function validCountry(value: string) {
+  return /^[A-Z]{2}$/.test(value);
+}
+
+function validCurrency(value: string) {
+  return /^[A-Z]{3}$/.test(value);
+}
+
+async function findMarketplaceSeller(db: RuntimeDatabase | RuntimeDatabaseClient, sellerId: string) {
+  return db.one<MarketplaceSellerRow>(
+    `SELECT s.*,
+            count(d.id)::int AS kyc_document_count,
+            count(d.id) FILTER (WHERE d.document_status = 'approved')::int AS approved_kyc_document_count
+     FROM marketplace_sellers s
+     LEFT JOIN marketplace_seller_kyc_documents d ON d.seller_id = s.seller_id
+     WHERE s.seller_id = $1
+     GROUP BY s.id
+     LIMIT 1`,
+    [sellerId]
+  );
+}
+
+async function findMarketplaceSellerApplication(db: RuntimeDatabase | RuntimeDatabaseClient, applicationId: string) {
+  return db.one<MarketplaceSellerApplicationRow>(
+    `SELECT a.*,
+            count(d.id)::int AS kyc_document_count,
+            count(d.id) FILTER (WHERE d.document_status = 'approved')::int AS approved_kyc_document_count
+     FROM marketplace_seller_applications a
+     LEFT JOIN marketplace_seller_kyc_documents d ON d.application_id = a.application_id
+     WHERE a.application_id = $1
+     GROUP BY a.id
+     LIMIT 1`,
+    [applicationId]
+  );
+}
+
+async function findMarketplaceSellerKycDocument(db: RuntimeDatabase | RuntimeDatabaseClient, documentId: string) {
+  return db.one<MarketplaceSellerKycDocumentRow>(
+    `SELECT id, seller_id, application_id, document_type, document_status, file_name, file_mime_type,
+            file_size_bytes, storage_key, checksum, rejection_reason, reviewed_by_principal_id,
+            reviewed_at, expires_at, metadata, created_at, updated_at
+     FROM marketplace_seller_kyc_documents
+     WHERE id = $1::uuid
+     LIMIT 1`,
+    [documentId]
+  );
+}
+
+async function marketplaceSellerApplications(db: RuntimeDatabase | RuntimeDatabaseClient, sellerId?: string) {
+  return db.query<MarketplaceSellerApplicationRow>(
+    `SELECT a.*,
+            count(d.id)::int AS kyc_document_count,
+            count(d.id) FILTER (WHERE d.document_status = 'approved')::int AS approved_kyc_document_count
+     FROM marketplace_seller_applications a
+     LEFT JOIN marketplace_seller_kyc_documents d ON d.application_id = a.application_id
+     WHERE ($1::text IS NULL OR a.seller_id = $1)
+     GROUP BY a.id
+     ORDER BY a.updated_at DESC`,
+    [sellerId ?? null]
+  );
+}
+
+async function marketplaceKycDocuments(
+  db: RuntimeDatabase | RuntimeDatabaseClient,
+  scope: { readonly applicationId?: string; readonly sellerId?: string } = {}
+) {
+  return db.query<MarketplaceSellerKycDocumentRow>(
+    `SELECT id, seller_id, application_id, document_type, document_status, file_name, file_mime_type,
+            file_size_bytes, storage_key, checksum, rejection_reason, reviewed_by_principal_id,
+            reviewed_at, expires_at, metadata, created_at, updated_at
+     FROM marketplace_seller_kyc_documents
+     WHERE ($1::text IS NULL OR application_id = $1)
+       AND ($2::text IS NULL OR seller_id = $2)
+     ORDER BY updated_at DESC`,
+    [scope.applicationId ?? null, scope.sellerId ?? null]
+  );
+}
+
+async function handleMarketplaceSellerList(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  const [sellers, moduleState] = await Promise.all([
+    input.db.query<MarketplaceSellerRow>(
+      `SELECT s.*,
+              count(d.id)::int AS kyc_document_count,
+              count(d.id) FILTER (WHERE d.document_status = 'approved')::int AS approved_kyc_document_count
+       FROM marketplace_sellers s
+       LEFT JOIN marketplace_seller_kyc_documents d ON d.seller_id = s.seller_id
+       GROUP BY s.id
+       ORDER BY s.updated_at DESC`
+    ),
+    getMarketplaceModuleState(input.db)
+  ]);
+  return json(200, {
+    status: "ok",
+    module: moduleState,
+    moduleWarning: moduleState?.isEnabled === false ? "marketplace_module_disabled" : undefined,
+    sellers: sellers.map(serializeMarketplaceSeller)
+  });
+}
+
+async function handleMarketplaceSellerDetail(input: OperationalRouteInput, sellerId: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  const seller = await findMarketplaceSeller(input.db, sellerId);
+  if (!seller) {
+    return json(404, { status: "marketplace_seller_not_found", sellerId });
+  }
+  const [applications, documents, events] = await Promise.all([
+    marketplaceSellerApplications(input.db, sellerId),
+    marketplaceKycDocuments(input.db, { sellerId }),
+    input.db.query<MarketplaceSellerEventRow>(
+      `SELECT id, seller_id, application_id, event_type, actor_principal_id, payload, created_at
+       FROM marketplace_seller_events
+       WHERE seller_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [sellerId]
+    )
+  ]);
+  return json(200, {
+    status: "ok",
+    seller: serializeMarketplaceSeller(seller),
+    applications: applications.map(serializeMarketplaceSellerApplication),
+    kycDocuments: documents.map(serializeMarketplaceSellerKycDocument),
+    events
+  });
+}
+
+async function handleMarketplaceSellerApplicationList(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  const [applications, moduleState] = await Promise.all([marketplaceSellerApplications(input.db), getMarketplaceModuleState(input.db)]);
+  return json(200, {
+    status: "ok",
+    module: moduleState,
+    moduleWarning: moduleState?.isEnabled === false ? "marketplace_module_disabled" : undefined,
+    applications: applications.map(serializeMarketplaceSellerApplication)
+  });
+}
+
+async function handleMarketplaceSellerApplicationDetail(input: OperationalRouteInput, applicationId: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  const application = await findMarketplaceSellerApplication(input.db, applicationId);
+  if (!application) {
+    return json(404, { status: "seller_application_not_found", applicationId });
+  }
+  const documents = await marketplaceKycDocuments(input.db, { applicationId });
+  return json(200, {
+    status: "ok",
+    application: serializeMarketplaceSellerApplication(application),
+    kycDocuments: documents.map(serializeMarketplaceSellerKycDocument)
+  });
+}
+
+async function handleMarketplaceSellerApplicationCreate(input: OperationalRouteInput) {
+  const denied = await requireMarketplaceMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const displayName = asString(input.body.displayName);
+  const legalName = asString(input.body.legalName);
+  const sellerType = asString(input.body.sellerType);
+  const country = asString(input.body.country)?.toUpperCase();
+  const email = asString(input.body.email)?.toLowerCase();
+  const phone = asString(input.body.phone) ?? null;
+  const taxNumber = asString(input.body.taxNumber) ?? null;
+  const tenantId = asString(input.body.tenantId) ?? null;
+  const providerContext = input.body.providerContext === undefined ? {} : input.body.providerContext;
+  if (!displayName || !legalName || !sellerType || !country || !validCountry(country) || !email || !validEmail(email) || !jsonObject(providerContext)) {
+    return json(422, {
+      status: "seller_application_invalid",
+      required: ["displayName", "legalName", "sellerType", "country", "email"]
+    });
+  }
+
+  return input.db.transaction(async (client) => {
+    if (tenantId && !(await findTenant(client, tenantId))) {
+      return json(404, { status: "tenant_not_found", tenantId });
+    }
+    const applicationId = newMarketplaceResourceId("application");
+    const saved = await client.one<MarketplaceSellerApplicationRow>(
+      `INSERT INTO marketplace_seller_applications
+        (application_id, tenant_id, applicant_principal_id, display_name, legal_name, seller_type,
+         country, email, phone, tax_number, status, review_status, provider_context)
+       VALUES ($1, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, 'draft', 'not_started', $11::jsonb)
+       RETURNING *`,
+      [applicationId, tenantId, actorPrincipalId(input), displayName, legalName, sellerType, country, email, phone, taxNumber, providerContext]
+    );
+    if (!saved) {
+      throw new Error("seller_application_create_failed");
+    }
+    await writeMarketplaceSellerEvent(client, input, "seller_application_created", { displayName, sellerType }, { applicationId });
+    return json(201, { status: "ok", application: serializeMarketplaceSellerApplication(saved) });
+  });
+}
+
+async function handleMarketplaceSellerApplicationUpdate(input: OperationalRouteInput, applicationId: string) {
+  const denied = await requireMarketplaceMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const providerContext = input.body.providerContext;
+  if (providerContext !== undefined && !jsonObject(providerContext)) {
+    return json(422, { status: "seller_application_provider_context_invalid" });
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findMarketplaceSellerApplication(client, applicationId);
+    if (!current) {
+      return json(404, { status: "seller_application_not_found", applicationId });
+    }
+    if (current.status !== "draft") {
+      return json(409, { status: "seller_application_not_editable", applicationId });
+    }
+    const email = asString(input.body.email)?.toLowerCase() ?? current.email;
+    const country = asString(input.body.country)?.toUpperCase() ?? current.country;
+    if (!validEmail(email) || !validCountry(country)) {
+      return json(422, { status: "seller_application_invalid" });
+    }
+    const saved = await client.one<MarketplaceSellerApplicationRow>(
+      `UPDATE marketplace_seller_applications
+       SET display_name = $2, legal_name = $3, seller_type = $4, country = $5, email = $6,
+           phone = $7, tax_number = $8, provider_context = $9::jsonb, updated_at = now()
+       WHERE application_id = $1
+       RETURNING *`,
+      [
+        applicationId,
+        asString(input.body.displayName) ?? current.display_name,
+        asString(input.body.legalName) ?? current.legal_name,
+        asString(input.body.sellerType) ?? current.seller_type,
+        country,
+        email,
+        asString(input.body.phone) ?? current.phone,
+        asString(input.body.taxNumber) ?? current.tax_number,
+        providerContext ?? current.provider_context
+      ]
+    );
+    if (!saved) {
+      throw new Error("seller_application_update_failed");
+    }
+    await writeMarketplaceSellerEvent(client, input, "seller_application_updated", {}, { applicationId });
+    return json(200, { status: "ok", application: serializeMarketplaceSellerApplication(saved) });
+  });
+}
+
+async function handleMarketplaceSellerApplicationSubmit(input: OperationalRouteInput, applicationId: string) {
+  const denied = await requireMarketplaceMutation(input);
+  if (denied) {
+    return denied;
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findMarketplaceSellerApplication(client, applicationId);
+    if (!current) {
+      return json(404, { status: "seller_application_not_found", applicationId });
+    }
+    if (current.status !== "draft") {
+      return json(409, { status: "seller_application_not_submittable", applicationId });
+    }
+    const saved = await client.one<MarketplaceSellerApplicationRow>(
+      `UPDATE marketplace_seller_applications
+       SET status = 'submitted', review_status = 'pending', submitted_at = now(), updated_at = now()
+       WHERE application_id = $1
+       RETURNING *`,
+      [applicationId]
+    );
+    if (!saved) {
+      throw new Error("seller_application_submit_failed");
+    }
+    await writeMarketplaceSellerEvent(client, input, "seller_application_submitted", {}, { applicationId });
+    return json(200, { status: "ok", application: serializeMarketplaceSellerApplication(saved) });
+  });
+}
+
+async function handleMarketplaceSellerApplicationApprove(input: OperationalRouteInput, applicationId: string) {
+  const denied = await requireMarketplaceMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const currency = (asString(input.body.currency) ?? "TRY").toUpperCase();
+  const website = asString(input.body.website) ?? null;
+  if (!validCurrency(currency)) {
+    return json(422, { status: "seller_currency_invalid" });
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findMarketplaceSellerApplication(client, applicationId);
+    if (!current) {
+      return json(404, { status: "seller_application_not_found", applicationId });
+    }
+    if (!["submitted", "under_review"].includes(current.status)) {
+      return json(409, { status: "seller_application_not_approvable", applicationId });
+    }
+    const documents = await marketplaceKycDocuments(client, { applicationId });
+    if (!documents.length || documents.some((document) => document.document_status !== "approved")) {
+      return json(409, {
+        status: "seller_application_kyc_incomplete",
+        applicationId,
+        documentCount: documents.length,
+        approvedDocumentCount: documents.filter((document) => document.document_status === "approved").length
+      });
+    }
+    const sellerId = current.seller_id ?? newMarketplaceResourceId("seller");
+    const seller = await client.one<MarketplaceSellerRow>(
+      `INSERT INTO marketplace_sellers
+        (seller_id, tenant_id, owner_principal_id, display_name, legal_name, seller_type, status, risk_status,
+         country, currency, tax_number, phone, email, website, onboarding_stage, approved_at)
+       VALUES ($1, $2, $3::uuid, $4, $5, $6, 'approved', 'normal', $7, $8, $9, $10, $11, $12, 'approved', now())
+       ON CONFLICT (seller_id) DO UPDATE
+       SET display_name = excluded.display_name, legal_name = excluded.legal_name, seller_type = excluded.seller_type,
+           status = 'approved', country = excluded.country, currency = excluded.currency, tax_number = excluded.tax_number,
+           phone = excluded.phone, email = excluded.email, website = excluded.website, onboarding_stage = 'approved',
+           approved_at = now(), rejected_at = NULL, suspended_at = NULL, updated_at = now()
+       RETURNING *`,
+      [
+        sellerId,
+        current.tenant_id,
+        current.applicant_principal_id,
+        current.display_name,
+        current.legal_name,
+        current.seller_type,
+        current.country,
+        currency,
+        current.tax_number,
+        current.phone,
+        current.email,
+        website
+      ]
+    );
+    if (!seller) {
+      throw new Error("marketplace_seller_create_failed");
+    }
+    await client.query(
+      `UPDATE marketplace_seller_applications
+       SET seller_id = $2, status = 'approved', review_status = 'approved',
+           reviewed_by_principal_id = $3::uuid, reviewed_at = now(), updated_at = now()
+       WHERE application_id = $1`,
+      [applicationId, sellerId, actorPrincipalId(input)]
+    );
+    await client.query(`UPDATE marketplace_seller_kyc_documents SET seller_id = $2, updated_at = now() WHERE application_id = $1`, [
+      applicationId,
+      sellerId
+    ]);
+    await writeMarketplaceSellerEvent(client, input, "seller_application_approved", {}, { sellerId, applicationId });
+    await writeMarketplaceSellerEvent(client, input, "seller_created", {}, { sellerId, applicationId });
+    return json(200, { status: "ok", seller: serializeMarketplaceSeller(seller) });
+  });
+}
+
+async function handleMarketplaceSellerApplicationReject(input: OperationalRouteInput, applicationId: string) {
+  const denied = await requireMarketplaceMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const reason = asString(input.body.reason) ?? asString(input.body.reviewNotes);
+  if (!reason) {
+    return json(422, { status: "seller_application_rejection_reason_required" });
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findMarketplaceSellerApplication(client, applicationId);
+    if (!current) {
+      return json(404, { status: "seller_application_not_found", applicationId });
+    }
+    if (["approved", "cancelled"].includes(current.status)) {
+      return json(409, { status: "seller_application_not_rejectable", applicationId });
+    }
+    const saved = await client.one<MarketplaceSellerApplicationRow>(
+      `UPDATE marketplace_seller_applications
+       SET status = 'rejected', review_status = 'rejected', review_notes = $2,
+           reviewed_by_principal_id = $3::uuid, reviewed_at = now(), updated_at = now()
+       WHERE application_id = $1
+       RETURNING *`,
+      [applicationId, reason, actorPrincipalId(input)]
+    );
+    if (!saved) {
+      throw new Error("seller_application_reject_failed");
+    }
+    await writeMarketplaceSellerEvent(client, input, "seller_application_rejected", { reason }, { applicationId });
+    return json(200, { status: "ok", application: serializeMarketplaceSellerApplication(saved) });
+  });
+}
+
+async function handleMarketplaceSellerSuspend(input: OperationalRouteInput, sellerId: string) {
+  const denied = await requireMarketplaceMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const reason = asString(input.body.reason);
+  if (!reason) {
+    return json(422, { status: "seller_suspend_reason_required" });
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findMarketplaceSeller(client, sellerId);
+    if (!current) {
+      return json(404, { status: "marketplace_seller_not_found", sellerId });
+    }
+    if (current.status !== "approved") {
+      return json(409, { status: "marketplace_seller_not_suspendable", sellerId });
+    }
+    const saved = await client.one<MarketplaceSellerRow>(
+      `UPDATE marketplace_sellers
+       SET status = 'suspended', suspended_at = now(), updated_at = now()
+       WHERE seller_id = $1
+       RETURNING *`,
+      [sellerId]
+    );
+    if (!saved) {
+      throw new Error("marketplace_seller_suspend_failed");
+    }
+    await writeMarketplaceSellerEvent(client, input, "seller_suspended", { reason }, { sellerId });
+    return json(200, { status: "ok", seller: serializeMarketplaceSeller(saved) });
+  });
+}
+
+async function handleMarketplaceSellerReactivate(input: OperationalRouteInput, sellerId: string) {
+  const denied = await requireMarketplaceMutation(input);
+  if (denied) {
+    return denied;
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findMarketplaceSeller(client, sellerId);
+    if (!current) {
+      return json(404, { status: "marketplace_seller_not_found", sellerId });
+    }
+    if (current.status !== "suspended") {
+      return json(409, { status: "marketplace_seller_not_reactivatable", sellerId });
+    }
+    const saved = await client.one<MarketplaceSellerRow>(
+      `UPDATE marketplace_sellers
+       SET status = 'approved', suspended_at = NULL, updated_at = now()
+       WHERE seller_id = $1
+       RETURNING *`,
+      [sellerId]
+    );
+    if (!saved) {
+      throw new Error("marketplace_seller_reactivate_failed");
+    }
+    await writeMarketplaceSellerEvent(client, input, "seller_reactivated", {}, { sellerId });
+    return json(200, { status: "ok", seller: serializeMarketplaceSeller(saved) });
+  });
+}
+
+async function handleMarketplaceSellerEvents(input: OperationalRouteInput, sellerId: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  if (!(await findMarketplaceSeller(input.db, sellerId))) {
+    return json(404, { status: "marketplace_seller_not_found", sellerId });
+  }
+  const events = await input.db.query<MarketplaceSellerEventRow>(
+    `SELECT id, seller_id, application_id, event_type, actor_principal_id, payload, created_at
+     FROM marketplace_seller_events
+     WHERE seller_id = $1
+     ORDER BY created_at DESC
+     LIMIT 50`,
+    [sellerId]
+  );
+  return json(200, { status: "ok", sellerId, events });
+}
+
+async function handleMarketplaceKycDocumentList(input: OperationalRouteInput, applicationId?: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  if (applicationId && !(await findMarketplaceSellerApplication(input.db, applicationId))) {
+    return json(404, { status: "seller_application_not_found", applicationId });
+  }
+  const documents = await marketplaceKycDocuments(input.db, applicationId ? { applicationId } : {});
+  return json(200, { status: "ok", kycDocuments: documents.map(serializeMarketplaceSellerKycDocument) });
+}
+
+async function handleMarketplaceKycDocumentCreate(input: OperationalRouteInput, applicationId: string) {
+  const denied = await requireMarketplaceMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const documentType = asString(input.body.documentType) ?? asString(input.body.document_type);
+  const fileName = asString(input.body.fileName) ?? asString(input.body.file_name);
+  const fileMimeType = asString(input.body.fileMimeType) ?? asString(input.body.file_mime_type) ?? null;
+  const storageKey = asString(input.body.storageKey) ?? asString(input.body.storage_key) ?? null;
+  const checksum = asString(input.body.checksum) ?? null;
+  const metadata = input.body.metadata ?? {};
+  const rawFileSize = input.body.fileSizeBytes ?? input.body.file_size_bytes;
+  const fileSizeBytes = rawFileSize === undefined || rawFileSize === null ? null : Number(rawFileSize);
+  if (!documentType || !fileName || !jsonObject(metadata) || (fileSizeBytes !== null && (!Number.isSafeInteger(fileSizeBytes) || fileSizeBytes < 0))) {
+    return json(422, { status: "seller_kyc_document_invalid", required: ["documentType", "fileName"] });
+  }
+  return input.db.transaction(async (client) => {
+    const application = await findMarketplaceSellerApplication(client, applicationId);
+    if (!application) {
+      return json(404, { status: "seller_application_not_found", applicationId });
+    }
+    if (!["draft", "submitted", "under_review"].includes(application.status)) {
+      return json(409, { status: "seller_application_document_add_blocked", applicationId });
+    }
+    const saved = await client.one<MarketplaceSellerKycDocumentRow>(
+      `INSERT INTO marketplace_seller_kyc_documents
+        (seller_id, application_id, document_type, document_status, file_name, file_mime_type,
+         file_size_bytes, storage_key, checksum, metadata)
+       VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9::jsonb)
+       RETURNING *`,
+      [application.seller_id, applicationId, documentType, fileName, fileMimeType, fileSizeBytes, storageKey, checksum, metadata]
+    );
+    if (!saved) {
+      throw new Error("seller_kyc_document_create_failed");
+    }
+    await writeMarketplaceSellerEvent(client, input, "seller_kyc_document_added", { documentId: saved.id, documentType }, {
+      sellerId: application.seller_id,
+      applicationId
+    });
+    return json(201, { status: "ok", storageUploadPerformed: false, kycDocument: serializeMarketplaceSellerKycDocument(saved) });
+  });
+}
+
+async function handleMarketplaceKycDocumentUpdate(input: OperationalRouteInput, documentId: string) {
+  const denied = await requireMarketplaceMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const metadata = input.body.metadata;
+  if (metadata !== undefined && !jsonObject(metadata)) {
+    return json(422, { status: "seller_kyc_document_metadata_invalid" });
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findMarketplaceSellerKycDocument(client, documentId);
+    if (!current) {
+      return json(404, { status: "seller_kyc_document_not_found", documentId });
+    }
+    if (current.document_status === "approved") {
+      return json(409, { status: "seller_kyc_document_not_editable", documentId });
+    }
+    const rawFileSize = input.body.fileSizeBytes ?? input.body.file_size_bytes;
+    const fileSizeBytes = rawFileSize === undefined ? current.file_size_bytes : Number(rawFileSize);
+    if (fileSizeBytes !== null && (!Number.isSafeInteger(Number(fileSizeBytes)) || Number(fileSizeBytes) < 0)) {
+      return json(422, { status: "seller_kyc_document_invalid" });
+    }
+    const saved = await client.one<MarketplaceSellerKycDocumentRow>(
+      `UPDATE marketplace_seller_kyc_documents
+       SET document_type = $2, file_name = $3, file_mime_type = $4, file_size_bytes = $5,
+           storage_key = $6, checksum = $7, expires_at = $8::timestamptz, metadata = $9::jsonb,
+           document_status = CASE WHEN document_status = 'rejected' THEN 'needs_update' ELSE document_status END,
+           rejection_reason = NULL, updated_at = now()
+       WHERE id = $1::uuid
+       RETURNING *`,
+      [
+        documentId,
+        asString(input.body.documentType) ?? asString(input.body.document_type) ?? current.document_type,
+        asString(input.body.fileName) ?? asString(input.body.file_name) ?? current.file_name,
+        asString(input.body.fileMimeType) ?? asString(input.body.file_mime_type) ?? current.file_mime_type,
+        fileSizeBytes,
+        asString(input.body.storageKey) ?? asString(input.body.storage_key) ?? current.storage_key,
+        asString(input.body.checksum) ?? current.checksum,
+        asString(input.body.expiresAt) ?? current.expires_at,
+        metadata ?? current.metadata
+      ]
+    );
+    if (!saved) {
+      throw new Error("seller_kyc_document_update_failed");
+    }
+    return json(200, { status: "ok", kycDocument: serializeMarketplaceSellerKycDocument(saved) });
+  });
+}
+
+async function handleMarketplaceKycDocumentApprove(input: OperationalRouteInput, documentId: string) {
+  const denied = await requireMarketplaceMutation(input);
+  if (denied) {
+    return denied;
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findMarketplaceSellerKycDocument(client, documentId);
+    if (!current) {
+      return json(404, { status: "seller_kyc_document_not_found", documentId });
+    }
+    const saved = await client.one<MarketplaceSellerKycDocumentRow>(
+      `UPDATE marketplace_seller_kyc_documents
+       SET document_status = 'approved', rejection_reason = NULL, reviewed_by_principal_id = $2::uuid,
+           reviewed_at = now(), updated_at = now()
+       WHERE id = $1::uuid
+       RETURNING *`,
+      [documentId, actorPrincipalId(input)]
+    );
+    if (!saved) {
+      throw new Error("seller_kyc_document_approve_failed");
+    }
+    await writeMarketplaceSellerEvent(client, input, "seller_kyc_document_approved", { documentId }, {
+      sellerId: current.seller_id,
+      applicationId: current.application_id
+    });
+    return json(200, { status: "ok", kycDocument: serializeMarketplaceSellerKycDocument(saved) });
+  });
+}
+
+async function handleMarketplaceKycDocumentReject(input: OperationalRouteInput, documentId: string) {
+  const denied = await requireMarketplaceMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const reason = asString(input.body.reason);
+  if (!reason) {
+    return json(422, { status: "seller_kyc_document_rejection_reason_required" });
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findMarketplaceSellerKycDocument(client, documentId);
+    if (!current) {
+      return json(404, { status: "seller_kyc_document_not_found", documentId });
+    }
+    const saved = await client.one<MarketplaceSellerKycDocumentRow>(
+      `UPDATE marketplace_seller_kyc_documents
+       SET document_status = 'rejected', rejection_reason = $2, reviewed_by_principal_id = $3::uuid,
+           reviewed_at = now(), updated_at = now()
+       WHERE id = $1::uuid
+       RETURNING *`,
+      [documentId, reason, actorPrincipalId(input)]
+    );
+    if (!saved) {
+      throw new Error("seller_kyc_document_reject_failed");
+    }
+    await writeMarketplaceSellerEvent(client, input, "seller_kyc_document_rejected", { documentId, reason }, {
+      sellerId: current.seller_id,
+      applicationId: current.application_id
+    });
+    return json(200, { status: "ok", kycDocument: serializeMarketplaceSellerKycDocument(saved) });
+  });
+}
+
+function parseMarketplacePath(pathname: string) {
+  const parts = pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  if (parts[0] !== "v1" || parts[1] !== "marketplace" || !parts[2]) {
+    return null;
+  }
+  if (parts[2] === "sellers") {
+    return parts[3]
+      ? marketplaceResourceIdPattern.test(parts[3])
+        ? { resource: "sellers", collection: false, id: parts[3], action: parts[4], extra: parts.slice(5) } as const
+        : null
+      : { resource: "sellers", collection: true } as const;
+  }
+  if (parts[2] === "seller-applications") {
+    return parts[3]
+      ? marketplaceResourceIdPattern.test(parts[3])
+        ? { resource: "applications", collection: false, id: parts[3], action: parts[4], extra: parts.slice(5) } as const
+        : null
+      : { resource: "applications", collection: true } as const;
+  }
+  if (parts[2] === "kyc-documents") {
+    return parts[3]
+      ? uuidPattern.test(parts[3])
+        ? { resource: "kyc-documents", collection: false, id: parts[3], action: parts[4], extra: parts.slice(5) } as const
+        : null
+      : { resource: "kyc-documents", collection: true } as const;
+  }
+  return null;
+}
+
+async function handleMarketplaceRoute(input: OperationalRouteInput) {
+  try {
+    const parsed = parseMarketplacePath(input.pathname);
+    if (!parsed) {
+      return json(404, { status: "marketplace_route_not_found", path: input.pathname });
+    }
+    if (parsed.resource === "sellers") {
+      if (parsed.collection) {
+        return input.method === "GET" ? handleMarketplaceSellerList(input) : json(405, { status: "method_not_allowed", allowedMethods: ["GET"] });
+      }
+      if (!parsed.action && input.method === "GET") {
+        return handleMarketplaceSellerDetail(input, parsed.id);
+      }
+      if (parsed.action === "events" && input.method === "GET" && parsed.extra.length === 0) {
+        return handleMarketplaceSellerEvents(input, parsed.id);
+      }
+      if (parsed.action === "suspend" && input.method === "POST" && parsed.extra.length === 0) {
+        return handleMarketplaceSellerSuspend(input, parsed.id);
+      }
+      if (parsed.action === "reactivate" && input.method === "POST" && parsed.extra.length === 0) {
+        return handleMarketplaceSellerReactivate(input, parsed.id);
+      }
+    }
+    if (parsed.resource === "applications") {
+      if (parsed.collection) {
+        if (input.method === "GET") {
+          return handleMarketplaceSellerApplicationList(input);
+        }
+        if (input.method === "POST") {
+          return handleMarketplaceSellerApplicationCreate(input);
+        }
+      } else {
+        if (!parsed.action && input.method === "GET") {
+          return handleMarketplaceSellerApplicationDetail(input, parsed.id);
+        }
+        if (!parsed.action && input.method === "PATCH") {
+          return handleMarketplaceSellerApplicationUpdate(input, parsed.id);
+        }
+        if (parsed.action === "submit" && input.method === "POST" && parsed.extra.length === 0) {
+          return handleMarketplaceSellerApplicationSubmit(input, parsed.id);
+        }
+        if (parsed.action === "approve" && input.method === "POST" && parsed.extra.length === 0) {
+          return handleMarketplaceSellerApplicationApprove(input, parsed.id);
+        }
+        if (parsed.action === "reject" && input.method === "POST" && parsed.extra.length === 0) {
+          return handleMarketplaceSellerApplicationReject(input, parsed.id);
+        }
+        if (parsed.action === "kyc-documents" && input.method === "GET" && parsed.extra.length === 0) {
+          return handleMarketplaceKycDocumentList(input, parsed.id);
+        }
+        if (parsed.action === "kyc-documents" && input.method === "POST" && parsed.extra.length === 0) {
+          return handleMarketplaceKycDocumentCreate(input, parsed.id);
+        }
+      }
+    }
+    if (parsed.resource === "kyc-documents") {
+      if (parsed.collection && input.method === "GET") {
+        return handleMarketplaceKycDocumentList(input);
+      }
+      if (!parsed.collection) {
+        if (!parsed.action && input.method === "PATCH") {
+          return handleMarketplaceKycDocumentUpdate(input, parsed.id);
+        }
+        if (parsed.action === "approve" && input.method === "POST" && parsed.extra.length === 0) {
+          return handleMarketplaceKycDocumentApprove(input, parsed.id);
+        }
+        if (parsed.action === "reject" && input.method === "POST" && parsed.extra.length === 0) {
+          return handleMarketplaceKycDocumentReject(input, parsed.id);
+        }
+      }
+    }
+    return json(404, { status: "marketplace_route_not_found", path: input.pathname });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "marketplace.seller_onboarding" });
+    }
+    throw error;
+  }
+}
+
 async function findTheme(db: RuntimeDatabase | RuntimeDatabaseClient, key: string) {
   return db.one<PlatformThemeRow>(
     `SELECT id, key, name, description, industry, category, status, version, is_core, is_premium,
@@ -3852,6 +4808,7 @@ export function isOperationalRuntimeRoute(pathname: string) {
     pathname === "/v1/plugins" ||
     pathname.startsWith("/v1/plugins/") ||
     pathname.startsWith("/v1/integrations/") ||
+    pathname.startsWith("/v1/marketplace/") ||
     pathname === "/v1/themes" ||
     pathname.startsWith("/v1/themes/") ||
     pathname === "/v1/tenants" ||
@@ -3882,6 +4839,10 @@ export async function handleOperationalRoute(input: OperationalRouteInput): Prom
 
   if (input.pathname.startsWith("/v1/integrations/")) {
     return handleIntegrationRoute(input);
+  }
+
+  if (input.pathname.startsWith("/v1/marketplace/")) {
+    return handleMarketplaceRoute(input);
   }
 
   if (input.pathname === "/v1/themes" || input.pathname.startsWith("/v1/themes/")) {

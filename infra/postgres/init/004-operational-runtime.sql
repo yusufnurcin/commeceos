@@ -296,6 +296,90 @@ CREATE TABLE IF NOT EXISTS platform_provider_resilience_policies (
   CONSTRAINT platform_provider_resilience_cooldown_check CHECK (circuit_breaker_cooldown_seconds BETWEEN 1 AND 86400)
 );
 
+CREATE TABLE IF NOT EXISTS marketplace_sellers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  seller_id text NOT NULL UNIQUE,
+  tenant_id text REFERENCES tenant_registry.tenants(tenant_id) ON DELETE SET NULL,
+  owner_principal_id uuid,
+  display_name text NOT NULL,
+  legal_name text,
+  seller_type text NOT NULL,
+  status text NOT NULL DEFAULT 'draft',
+  risk_status text NOT NULL DEFAULT 'normal',
+  country text NOT NULL,
+  currency text NOT NULL,
+  tax_number text,
+  phone text,
+  email text,
+  website text,
+  onboarding_stage text NOT NULL DEFAULT 'application',
+  approved_at timestamptz,
+  rejected_at timestamptz,
+  suspended_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT marketplace_sellers_status_check CHECK (status IN ('draft', 'pending_review', 'approved', 'rejected', 'suspended', 'archived')),
+  CONSTRAINT marketplace_sellers_risk_status_check CHECK (risk_status IN ('normal', 'watch', 'high', 'blocked'))
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_seller_applications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  application_id text NOT NULL UNIQUE,
+  tenant_id text REFERENCES tenant_registry.tenants(tenant_id) ON DELETE SET NULL,
+  seller_id text REFERENCES marketplace_sellers(seller_id) ON DELETE SET NULL,
+  applicant_principal_id uuid,
+  display_name text NOT NULL,
+  legal_name text NOT NULL,
+  seller_type text NOT NULL,
+  country text NOT NULL,
+  email text NOT NULL,
+  phone text,
+  tax_number text,
+  status text NOT NULL DEFAULT 'draft',
+  review_status text NOT NULL DEFAULT 'not_started',
+  review_notes text,
+  reviewed_by_principal_id uuid,
+  reviewed_at timestamptz,
+  submitted_at timestamptz,
+  provider_context jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT marketplace_seller_applications_status_check CHECK (status IN ('draft', 'submitted', 'under_review', 'approved', 'rejected', 'cancelled')),
+  CONSTRAINT marketplace_seller_applications_review_status_check CHECK (review_status IN ('not_started', 'pending', 'approved', 'rejected'))
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_seller_kyc_documents (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  seller_id text REFERENCES marketplace_sellers(seller_id) ON DELETE SET NULL,
+  application_id text REFERENCES marketplace_seller_applications(application_id) ON DELETE CASCADE,
+  document_type text NOT NULL,
+  document_status text NOT NULL DEFAULT 'pending',
+  file_name text NOT NULL,
+  file_mime_type text,
+  file_size_bytes bigint,
+  storage_key text,
+  checksum text,
+  rejection_reason text,
+  reviewed_by_principal_id uuid,
+  reviewed_at timestamptz,
+  expires_at timestamptz,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT marketplace_seller_kyc_documents_status_check CHECK (document_status IN ('pending', 'approved', 'rejected', 'expired', 'needs_update')),
+  CONSTRAINT marketplace_seller_kyc_documents_file_size_check CHECK (file_size_bytes IS NULL OR file_size_bytes >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_seller_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  seller_id text REFERENCES marketplace_sellers(seller_id) ON DELETE SET NULL,
+  application_id text REFERENCES marketplace_seller_applications(application_id) ON DELETE SET NULL,
+  event_type text NOT NULL,
+  actor_principal_id uuid,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS platform_themes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   key text NOT NULL UNIQUE,
@@ -381,6 +465,14 @@ CREATE INDEX IF NOT EXISTS platform_integration_credentials_provider_idx ON plat
 CREATE INDEX IF NOT EXISTS platform_integration_health_provider_idx ON platform_integration_health (provider_id, tenant_id, last_checked_at DESC);
 CREATE INDEX IF NOT EXISTS platform_integration_events_provider_idx ON platform_integration_events (provider_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS platform_integration_events_credential_idx ON platform_integration_events (credential_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS marketplace_sellers_status_risk_idx ON marketplace_sellers (status, risk_status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS marketplace_sellers_tenant_idx ON marketplace_sellers (tenant_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS marketplace_seller_applications_status_idx ON marketplace_seller_applications (status, review_status, submitted_at DESC);
+CREATE INDEX IF NOT EXISTS marketplace_seller_applications_tenant_idx ON marketplace_seller_applications (tenant_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS marketplace_seller_kyc_documents_application_idx ON marketplace_seller_kyc_documents (application_id, document_status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS marketplace_seller_kyc_documents_seller_idx ON marketplace_seller_kyc_documents (seller_id, document_status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS marketplace_seller_events_seller_idx ON marketplace_seller_events (seller_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS marketplace_seller_events_application_idx ON marketplace_seller_events (application_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS platform_themes_industry_category_idx ON platform_themes (industry, category, status);
 CREATE INDEX IF NOT EXISTS platform_theme_assignments_theme_idx ON platform_theme_assignments (theme_id, status);
 CREATE INDEX IF NOT EXISTS platform_theme_events_tenant_idx ON platform_theme_events (tenant_id, created_at DESC);

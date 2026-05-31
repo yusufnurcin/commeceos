@@ -1832,6 +1832,206 @@ mark[data-state="ok"] {
   gap: 8px;
 }
 
+.seller-onboarding-panel,
+.seller-kyc-panel,
+.seller-detail-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.seller-toolbar {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(240px, 1fr) minmax(170px, 0.35fr) minmax(170px, 0.35fr);
+}
+
+.seller-toolbar label,
+.seller-form label,
+.seller-onboarding-detail label {
+  color: var(--text);
+  display: grid;
+  font-size: 0.86rem;
+  font-weight: 700;
+  gap: 6px;
+}
+
+.seller-toolbar input,
+.seller-toolbar select,
+.seller-form input,
+.seller-form select,
+.seller-form textarea,
+.seller-onboarding-detail textarea {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(2, 6, 23, 0.5);
+  border-radius: 8px;
+  color: var(--text);
+  min-height: 40px;
+  padding: 9px 10px;
+}
+
+.seller-form textarea,
+.seller-onboarding-detail textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
+.seller-onboarding-layout,
+.seller-kyc-layout {
+  align-items: start;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.36fr);
+}
+
+.seller-onboarding-main,
+.seller-onboarding-detail,
+.seller-detail-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.seller-onboarding-detail {
+  position: sticky;
+  top: 18px;
+}
+
+.seller-section,
+.seller-onboarding-detail section {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.7);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.seller-section > header,
+.seller-record-card > header,
+.seller-document-list article > header {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.seller-section h2,
+.seller-section h3,
+.seller-section p,
+.seller-onboarding-detail h2,
+.seller-record-card h3,
+.seller-record-card p {
+  margin: 0;
+}
+
+.seller-section p,
+.seller-record-card p,
+.seller-record-card span,
+.seller-record-card small,
+.seller-document-list span,
+.seller-document-list small,
+.seller-onboarding-detail span,
+.seller-event-list span {
+  color: var(--muted);
+}
+
+.seller-card-list,
+.seller-document-list,
+.seller-event-list,
+.seller-form {
+  display: grid;
+  gap: 10px;
+}
+
+.seller-record-card,
+.seller-document-list article,
+.seller-event-list article {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(2, 6, 23, 0.32);
+  border-radius: 8px;
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+}
+
+.seller-record-card[data-selected="true"],
+.seller-document-list article[data-selected="true"] {
+  border-color: rgba(56, 189, 248, 0.58);
+}
+
+.seller-record-card mark,
+.seller-document-list mark,
+.seller-section mark {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 0.76rem;
+  padding: 5px 8px;
+}
+
+.seller-record-card button,
+.seller-record-card a,
+.seller-document-list button,
+.seller-onboarding-detail button,
+.seller-section button {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 9px 11px;
+  text-decoration: none;
+}
+
+.seller-record-card button,
+.seller-record-card a {
+  justify-self: start;
+}
+
+.seller-record-card button:disabled,
+.seller-document-list button:disabled,
+.seller-onboarding-detail button:disabled,
+.seller-section button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.seller-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.seller-metadata {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin: 0;
+}
+
+.seller-metadata div {
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  padding: 9px;
+}
+
+.seller-metadata dt {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.seller-metadata dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.seller-detail-grid {
+  align-items: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .theme-registry-layout {
   align-items: start;
   display: grid;
@@ -1988,11 +2188,19 @@ mark[data-state="ok"] {
   }
 
   .integration-form,
-  .integration-policy-grid {
+  .integration-policy-grid,
+  .seller-toolbar,
+  .seller-onboarding-layout,
+  .seller-kyc-layout,
+  .seller-detail-grid {
     grid-template-columns: 1fr;
   }
 
   .module-registry-detail {
+    position: static;
+  }
+
+  .seller-onboarding-detail {
     position: static;
   }
 
