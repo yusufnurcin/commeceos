@@ -380,6 +380,104 @@ CREATE TABLE IF NOT EXISTS marketplace_seller_events (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS catalog_products (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id text NOT NULL UNIQUE,
+  tenant_id text REFERENCES tenant_registry.tenants(tenant_id) ON DELETE SET NULL,
+  seller_id text REFERENCES marketplace_sellers(seller_id) ON DELETE SET NULL,
+  title text NOT NULL,
+  subtitle text,
+  description text,
+  product_type text NOT NULL,
+  status text NOT NULL DEFAULT 'draft',
+  moderation_status text NOT NULL DEFAULT 'pending_review',
+  sync_status text NOT NULL DEFAULT 'not_synced',
+  country text NOT NULL,
+  currency text NOT NULL,
+  base_price_amount numeric(18, 4),
+  tax_category text,
+  sku text,
+  barcode text,
+  slug text,
+  brand text,
+  category_key text,
+  attributes jsonb NOT NULL DEFAULT '{}'::jsonb,
+  media jsonb NOT NULL DEFAULT '[]'::jsonb,
+  seo jsonb NOT NULL DEFAULT '{}'::jsonb,
+  medusa_product_id text,
+  created_by_principal_id uuid,
+  approved_by_principal_id uuid,
+  approved_at timestamptz,
+  rejected_at timestamptz,
+  rejection_reason text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT catalog_products_type_check CHECK (product_type IN ('physical', 'digital', 'service', 'subscription', 'bundle', 'auction', 'rental')),
+  CONSTRAINT catalog_products_status_check CHECK (status IN ('draft', 'active', 'inactive', 'archived')),
+  CONSTRAINT catalog_products_moderation_status_check CHECK (moderation_status IN ('pending_review', 'approved', 'rejected', 'needs_changes')),
+  CONSTRAINT catalog_products_sync_status_check CHECK (sync_status IN ('not_synced', 'queued', 'syncing', 'synced', 'failed')),
+  CONSTRAINT catalog_products_price_check CHECK (base_price_amount IS NULL OR base_price_amount >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS catalog_product_variants (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id text NOT NULL REFERENCES catalog_products(product_id) ON DELETE CASCADE,
+  variant_id text NOT NULL UNIQUE,
+  title text NOT NULL,
+  sku text,
+  barcode text,
+  price_amount numeric(18, 4),
+  currency text,
+  stock_quantity integer,
+  attributes jsonb NOT NULL DEFAULT '{}'::jsonb,
+  medusa_variant_id text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT catalog_product_variants_price_check CHECK (price_amount IS NULL OR price_amount >= 0),
+  CONSTRAINT catalog_product_variants_stock_check CHECK (stock_quantity IS NULL OR stock_quantity >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS catalog_categories (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  category_key text NOT NULL UNIQUE,
+  parent_key text REFERENCES catalog_categories(category_key) ON DELETE SET NULL,
+  name text NOT NULL,
+  description text,
+  status text NOT NULL DEFAULT 'active',
+  sort_order integer NOT NULL DEFAULT 0,
+  seo jsonb NOT NULL DEFAULT '{}'::jsonb,
+  medusa_category_id text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT catalog_categories_key_check CHECK (category_key ~ '^[a-z0-9][a-z0-9_-]{1,63}$'),
+  CONSTRAINT catalog_categories_status_check CHECK (status IN ('active', 'inactive', 'archived'))
+);
+
+CREATE TABLE IF NOT EXISTS catalog_product_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id text REFERENCES catalog_products(product_id) ON DELETE SET NULL,
+  event_type text NOT NULL,
+  actor_principal_id uuid,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS catalog_medusa_sync_jobs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id text NOT NULL UNIQUE,
+  product_id text REFERENCES catalog_products(product_id) ON DELETE SET NULL,
+  job_type text NOT NULL,
+  status text NOT NULL DEFAULT 'queued',
+  attempt_count integer NOT NULL DEFAULT 0,
+  last_error text,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  result jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT catalog_medusa_sync_jobs_status_check CHECK (status IN ('queued', 'processing', 'completed', 'failed', 'cancelled')),
+  CONSTRAINT catalog_medusa_sync_jobs_attempt_check CHECK (attempt_count >= 0)
+);
+
 CREATE TABLE IF NOT EXISTS platform_themes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   key text NOT NULL UNIQUE,
@@ -473,6 +571,14 @@ CREATE INDEX IF NOT EXISTS marketplace_seller_kyc_documents_application_idx ON m
 CREATE INDEX IF NOT EXISTS marketplace_seller_kyc_documents_seller_idx ON marketplace_seller_kyc_documents (seller_id, document_status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS marketplace_seller_events_seller_idx ON marketplace_seller_events (seller_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS marketplace_seller_events_application_idx ON marketplace_seller_events (application_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS catalog_products_status_idx ON catalog_products (status, moderation_status, sync_status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS catalog_products_tenant_idx ON catalog_products (tenant_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS catalog_products_seller_idx ON catalog_products (seller_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS catalog_product_variants_product_idx ON catalog_product_variants (product_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS catalog_categories_parent_idx ON catalog_categories (parent_key, sort_order, name);
+CREATE INDEX IF NOT EXISTS catalog_product_events_product_idx ON catalog_product_events (product_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS catalog_medusa_sync_jobs_product_idx ON catalog_medusa_sync_jobs (product_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS catalog_medusa_sync_jobs_status_idx ON catalog_medusa_sync_jobs (status, created_at);
 CREATE INDEX IF NOT EXISTS platform_themes_industry_category_idx ON platform_themes (industry, category, status);
 CREATE INDEX IF NOT EXISTS platform_theme_assignments_theme_idx ON platform_theme_assignments (theme_id, status);
 CREATE INDEX IF NOT EXISTS platform_theme_events_tenant_idx ON platform_theme_events (tenant_id, created_at DESC);

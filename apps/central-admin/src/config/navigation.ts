@@ -356,7 +356,7 @@ const workspaceSeeds: readonly WorkspaceSeed[] = [
     status: "requires-medusa",
     refs: ["PDF: Ürün Yönetimi", "PDF: seller Ürün Yönetimi"],
     items: [
-      { segment: "products", label: "Ürünler", description: "Global ürün görünürlüğü ve moderasyon.", status: "requires-medusa", engine: "medusa", permission: "catalog.products.view" },
+      { segment: "products", label: "Ürünler", description: "Global ürün görünürlüğü ve moderasyon.", status: "runtime-ready", engine: "medusa", permission: "catalog.products.view" },
       { segment: "variants", label: "Varyantlar", description: "Renk, beden, lisans, paket ve ürün varyant kontrolü.", status: "requires-medusa", engine: "medusa", permission: "catalog.variants.view" },
       { segment: "attributes", label: "Özellikler", description: "Dinamik özellik, filtre alanı ve ürün attribute mimarisi.", status: "planned", permission: "catalog.attributes.manage" },
       { segment: "brands", label: "Markalar", description: "Marka registry ve ürün eşleştirmeleri.", status: "planned", permission: "catalog.brands.manage" },
@@ -377,7 +377,7 @@ const workspaceSeeds: readonly WorkspaceSeed[] = [
     status: "planned",
     refs: ["PDF: Kategori Yönetimi", "PDF: Global Kategori Eşleştirme"],
     items: [
-      { segment: "/catalog/categories", label: "Kategoriler", description: "Ana, alt ve çok katmanlı kategori yönetimi.", status: "planned", permission: "catalog.categories.view" },
+      { segment: "/catalog/categories", label: "Kategoriler", description: "Ana, alt ve çok katmanlı kategori yönetimi.", status: "runtime-ready", permission: "catalog.categories.view" },
       { segment: "/catalog/taxonomy/filters", label: "Kategori Filtreleri", description: "Filtre alanları ve dinamik özellik eşleştirmeleri.", status: "planned", permission: "catalog.categories.filters.manage" },
       { segment: "/catalog/taxonomy/seo-geo", label: "Kategori SEO / GEO", description: "Kategori meta, bölgesel landing ve GEO alanları.", status: "planned", permission: "catalog.categories.seo.manage" },
       { segment: "/catalog/taxonomy/tax-rules", label: "Kategori Vergi Kuralları", description: "Kategori bazlı vergi rejimleri.", status: "planned", permission: "catalog.categories.tax.manage", moduleKey: "accounting" },

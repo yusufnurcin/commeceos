@@ -36,6 +36,7 @@ import {
 } from "../runtime/crypto";
 import type { RuntimeDatabase, RuntimeDatabaseClient } from "../runtime/db";
 import { isRuntimeStoreUnavailable } from "../runtime/db";
+import { checkService } from "../runtime/health-matrix";
 import type { RequestContext } from "../runtime/request-context";
 import type { ServiceRegistryEntry } from "../runtime/service-registry";
 import type { VerifiedAuthContext } from "../runtime/auth-verifier";
@@ -373,11 +374,101 @@ interface MarketplaceSellerEventRow {
   readonly created_at: Date | string;
 }
 
+interface CatalogProductRow {
+  readonly id: string;
+  readonly product_id: string;
+  readonly tenant_id: string | null;
+  readonly seller_id: string | null;
+  readonly title: string;
+  readonly subtitle: string | null;
+  readonly description: string | null;
+  readonly product_type: string;
+  readonly status: string;
+  readonly moderation_status: string;
+  readonly sync_status: string;
+  readonly country: string;
+  readonly currency: string;
+  readonly base_price_amount: number | string | null;
+  readonly tax_category: string | null;
+  readonly sku: string | null;
+  readonly barcode: string | null;
+  readonly slug: string | null;
+  readonly brand: string | null;
+  readonly category_key: string | null;
+  readonly attributes: unknown;
+  readonly media: unknown;
+  readonly seo: unknown;
+  readonly medusa_product_id: string | null;
+  readonly created_by_principal_id: string | null;
+  readonly approved_by_principal_id: string | null;
+  readonly approved_at: Date | string | null;
+  readonly rejected_at: Date | string | null;
+  readonly rejection_reason: string | null;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+  readonly variant_count?: number;
+}
+
+interface CatalogProductVariantRow {
+  readonly id: string;
+  readonly product_id: string;
+  readonly variant_id: string;
+  readonly title: string;
+  readonly sku: string | null;
+  readonly barcode: string | null;
+  readonly price_amount: number | string | null;
+  readonly currency: string | null;
+  readonly stock_quantity: number | null;
+  readonly attributes: unknown;
+  readonly medusa_variant_id: string | null;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
+interface CatalogCategoryRow {
+  readonly id: string;
+  readonly category_key: string;
+  readonly parent_key: string | null;
+  readonly name: string;
+  readonly description: string | null;
+  readonly status: string;
+  readonly sort_order: number;
+  readonly seo: unknown;
+  readonly medusa_category_id: string | null;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
+interface CatalogProductEventRow {
+  readonly id: string;
+  readonly product_id: string | null;
+  readonly event_type: string;
+  readonly actor_principal_id: string | null;
+  readonly payload: unknown;
+  readonly created_at: Date | string;
+}
+
+interface CatalogMedusaSyncJobRow {
+  readonly id: string;
+  readonly job_id: string;
+  readonly product_id: string | null;
+  readonly job_type: string;
+  readonly status: string;
+  readonly attempt_count: number;
+  readonly last_error: string | null;
+  readonly payload: unknown;
+  readonly result: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const moduleKeyPattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 const credentialFieldKeyPattern = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const marketplaceResourceIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,127}$/;
+const catalogProductTypes = new Set(["physical", "digital", "service", "subscription", "bundle", "auction", "rental"]);
+const catalogCategoryStatuses = new Set(["active", "inactive", "archived"]);
 
 export const publicAuthRuntimePaths = new Set([
   "/v1/auth/login",
@@ -686,6 +777,25 @@ async function writeMarketplaceSellerEvent(
   await writeAudit(db, input, eventType, "accepted", {
     sellerId: scope.sellerId ?? null,
     applicationId: scope.applicationId ?? null,
+    ...payload
+  });
+}
+
+async function writeCatalogProductEvent(
+  db: RuntimeDatabase | RuntimeDatabaseClient,
+  input: OperationalRouteInput,
+  eventType: string,
+  payload: JsonRecord = {},
+  productId?: string | null
+) {
+  await db.query(
+    `INSERT INTO catalog_product_events
+      (product_id, event_type, actor_principal_id, payload)
+     VALUES ($1, $2, $3::uuid, $4::jsonb)`,
+    [productId ?? null, eventType, actorPrincipalId(input), payload]
+  );
+  await writeAudit(db, input, eventType, "accepted", {
+    productId: productId ?? null,
     ...payload
   });
 }
@@ -1060,6 +1170,90 @@ function serializeMarketplaceSellerKycDocument(row: MarketplaceSellerKycDocument
     reviewedAt: row.reviewed_at,
     expiresAt: row.expires_at,
     metadata: row.metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeCatalogProduct(row: CatalogProductRow) {
+  return {
+    id: row.id,
+    productId: row.product_id,
+    tenantId: row.tenant_id,
+    sellerId: row.seller_id,
+    title: row.title,
+    subtitle: row.subtitle,
+    description: row.description,
+    productType: row.product_type,
+    status: row.status,
+    moderationStatus: row.moderation_status,
+    syncStatus: row.sync_status,
+    country: row.country,
+    currency: row.currency,
+    basePriceAmount: row.base_price_amount === null ? null : Number(row.base_price_amount),
+    taxCategory: row.tax_category,
+    sku: row.sku,
+    barcode: row.barcode,
+    slug: row.slug,
+    brand: row.brand,
+    categoryKey: row.category_key,
+    attributes: row.attributes,
+    media: row.media,
+    seo: row.seo,
+    medusaProductId: row.medusa_product_id,
+    approvedByPrincipalId: row.approved_by_principal_id,
+    approvedAt: row.approved_at,
+    rejectedAt: row.rejected_at,
+    rejectionReason: row.rejection_reason,
+    variantCount: Number(row.variant_count ?? 0),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeCatalogVariant(row: CatalogProductVariantRow) {
+  return {
+    id: row.id,
+    productId: row.product_id,
+    variantId: row.variant_id,
+    title: row.title,
+    sku: row.sku,
+    barcode: row.barcode,
+    priceAmount: row.price_amount === null ? null : Number(row.price_amount),
+    currency: row.currency,
+    stockQuantity: row.stock_quantity,
+    attributes: row.attributes,
+    medusaVariantId: row.medusa_variant_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeCatalogCategory(row: CatalogCategoryRow) {
+  return {
+    id: row.id,
+    categoryKey: row.category_key,
+    parentKey: row.parent_key,
+    name: row.name,
+    description: row.description,
+    status: row.status,
+    sortOrder: row.sort_order,
+    seo: row.seo,
+    medusaCategoryId: row.medusa_category_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeCatalogSyncJob(row: CatalogMedusaSyncJobRow) {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    productId: row.product_id,
+    jobType: row.job_type,
+    status: row.status,
+    attemptCount: row.attempt_count,
+    lastError: row.last_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -3690,6 +3884,710 @@ async function handleMarketplaceRoute(input: OperationalRouteInput) {
   }
 }
 
+async function getCatalogModuleState(db: RuntimeDatabase | RuntimeDatabaseClient) {
+  const row = await findModule(db, "catalog");
+  return row ? serializeModule(row) : null;
+}
+
+async function requireCatalogMutation(input: OperationalRouteInput, db: RuntimeDatabase | RuntimeDatabaseClient = input.db) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  const moduleState = await getCatalogModuleState(db);
+  if (!moduleState?.isEnabled) {
+    await writeAudit(db, input, "catalog_module_required", "rejected", { moduleKey: "catalog" });
+    return json(409, {
+      status: "catalog_module_required",
+      moduleKey: "catalog",
+      message: "Katalog islemleri icin catalog modulunu Modul Merkezi uzerinden aktif edin."
+    });
+  }
+
+  return null;
+}
+
+function newCatalogResourceId(prefix: "product" | "variant" | "job") {
+  return `${prefix}_${randomUUID().replace(/-/g, "")}`;
+}
+
+function optionalAmount(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function optionalStock(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function validSlug(value: string) {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
+}
+
+async function findCatalogProduct(db: RuntimeDatabase | RuntimeDatabaseClient, productId: string) {
+  return db.one<CatalogProductRow>(
+    `SELECT p.*, count(v.id)::int AS variant_count
+     FROM catalog_products p
+     LEFT JOIN catalog_product_variants v ON v.product_id = p.product_id
+     WHERE p.product_id = $1
+     GROUP BY p.id
+     LIMIT 1`,
+    [productId]
+  );
+}
+
+async function catalogVariants(db: RuntimeDatabase | RuntimeDatabaseClient, productId: string) {
+  return db.query<CatalogProductVariantRow>(
+    `SELECT id, product_id, variant_id, title, sku, barcode, price_amount, currency,
+            stock_quantity, attributes, medusa_variant_id, created_at, updated_at
+     FROM catalog_product_variants
+     WHERE product_id = $1
+     ORDER BY updated_at DESC`,
+    [productId]
+  );
+}
+
+async function catalogSyncJobs(db: RuntimeDatabase | RuntimeDatabaseClient, productId?: string) {
+  return db.query<CatalogMedusaSyncJobRow>(
+    `SELECT id, job_id, product_id, job_type, status, attempt_count, last_error, payload, result, created_at, updated_at
+     FROM catalog_medusa_sync_jobs
+     WHERE ($1::text IS NULL OR product_id = $1)
+     ORDER BY created_at DESC
+     LIMIT 100`,
+    [productId ?? null]
+  );
+}
+
+async function catalogMedusaHealth(input: OperationalRouteInput) {
+  const medusa = input.registry.find((entry) => entry.name === "medusa");
+  if (!medusa) {
+    return { status: "failed" as const, message: "Medusa servis kaydi bulunamadi." };
+  }
+  const result = await checkService(medusa);
+  return {
+    status: result.status,
+    latencyMs: result.latencyMs,
+    checkedAt: result.checkedAt,
+    ...(result.error ? { message: result.error } : {})
+  };
+}
+
+async function approvedSellerExists(db: RuntimeDatabase | RuntimeDatabaseClient, sellerId: string) {
+  return db.one<{ readonly seller_id: string }>(
+    `SELECT seller_id FROM marketplace_sellers WHERE seller_id = $1 AND status = 'approved' LIMIT 1`,
+    [sellerId]
+  );
+}
+
+async function categoryExists(db: RuntimeDatabase | RuntimeDatabaseClient, categoryKey: string) {
+  return db.one<{ readonly category_key: string }>(
+    `SELECT category_key FROM catalog_categories WHERE category_key = $1 LIMIT 1`,
+    [categoryKey]
+  );
+}
+
+async function handleCatalogProductList(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  const [products, moduleState, medusaHealth] = await Promise.all([
+    input.db.query<CatalogProductRow>(
+      `SELECT p.*, count(v.id)::int AS variant_count
+       FROM catalog_products p
+       LEFT JOIN catalog_product_variants v ON v.product_id = p.product_id
+       GROUP BY p.id
+       ORDER BY p.updated_at DESC`
+    ),
+    getCatalogModuleState(input.db),
+    catalogMedusaHealth(input)
+  ]);
+  return json(200, {
+    status: "ok",
+    module: moduleState,
+    moduleWarning: moduleState?.isEnabled === false ? "catalog_module_disabled" : undefined,
+    medusaHealth,
+    products: products.map(serializeCatalogProduct)
+  });
+}
+
+async function handleCatalogProductDetail(input: OperationalRouteInput, productId: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  const product = await findCatalogProduct(input.db, productId);
+  if (!product) {
+    return json(404, { status: "catalog_product_not_found", productId });
+  }
+  const [variants, jobs, events, medusaHealth] = await Promise.all([
+    catalogVariants(input.db, productId),
+    catalogSyncJobs(input.db, productId),
+    input.db.query<CatalogProductEventRow>(
+      `SELECT id, product_id, event_type, actor_principal_id, payload, created_at
+       FROM catalog_product_events
+       WHERE product_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [productId]
+    ),
+    catalogMedusaHealth(input)
+  ]);
+  return json(200, {
+    status: "ok",
+    product: serializeCatalogProduct(product),
+    variants: variants.map(serializeCatalogVariant),
+    syncJobs: jobs.map(serializeCatalogSyncJob),
+    events,
+    medusaHealth
+  });
+}
+
+async function handleCatalogProductCreate(input: OperationalRouteInput) {
+  const denied = await requireCatalogMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const title = asString(input.body.title);
+  const productType = asString(input.body.productType);
+  const country = asString(input.body.country)?.toUpperCase();
+  const currency = asString(input.body.currency)?.toUpperCase();
+  const basePriceAmount = optionalAmount(input.body.basePriceAmount);
+  const sellerId = asString(input.body.sellerId) ?? null;
+  const tenantId = asString(input.body.tenantId) ?? null;
+  const categoryKey = asString(input.body.categoryKey) ?? null;
+  const attributes = input.body.attributes ?? {};
+  const media = input.body.media ?? [];
+  const seo = input.body.seo ?? {};
+  const slug = asString(input.body.slug) ?? null;
+  if (
+    !title ||
+    !productType ||
+    !catalogProductTypes.has(productType) ||
+    !country ||
+    !validCountry(country) ||
+    !currency ||
+    !validCurrency(currency) ||
+    basePriceAmount === undefined ||
+    !jsonObject(attributes) ||
+    !Array.isArray(media) ||
+    !jsonObject(seo) ||
+    (slug !== null && !validSlug(slug))
+  ) {
+    return json(422, {
+      status: "catalog_product_invalid",
+      required: ["title", "productType", "country", "currency"]
+    });
+  }
+  return input.db.transaction(async (client) => {
+    if (tenantId && !(await findTenant(client, tenantId))) {
+      return json(404, { status: "tenant_not_found", tenantId });
+    }
+    if (sellerId && !(await approvedSellerExists(client, sellerId))) {
+      return json(409, { status: "seller_not_approved", sellerId });
+    }
+    if (categoryKey && !(await categoryExists(client, categoryKey))) {
+      return json(404, { status: "catalog_category_not_found", categoryKey });
+    }
+    const productId = newCatalogResourceId("product");
+    const saved = await client.one<CatalogProductRow>(
+      `INSERT INTO catalog_products
+        (product_id, tenant_id, seller_id, title, subtitle, description, product_type, country, currency,
+         base_price_amount, tax_category, sku, barcode, slug, brand, category_key, attributes, media, seo, created_by_principal_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb, $19::jsonb, $20::uuid)
+       RETURNING *`,
+      [
+        productId, tenantId, sellerId, title, asString(input.body.subtitle) ?? null, asString(input.body.description) ?? null,
+        productType, country, currency, basePriceAmount, asString(input.body.taxCategory) ?? null, asString(input.body.sku) ?? null,
+        asString(input.body.barcode) ?? null, slug, asString(input.body.brand) ?? null, categoryKey, attributes, media, seo, actorPrincipalId(input)
+      ]
+    );
+    if (!saved) {
+      throw new Error("catalog_product_create_failed");
+    }
+    await writeCatalogProductEvent(client, input, "catalog_product_created", { title, productType }, productId);
+    return json(201, { status: "ok", product: serializeCatalogProduct(saved) });
+  });
+}
+
+async function handleCatalogProductUpdate(input: OperationalRouteInput, productId: string) {
+  const denied = await requireCatalogMutation(input);
+  if (denied) {
+    return denied;
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findCatalogProduct(client, productId);
+    if (!current) {
+      return json(404, { status: "catalog_product_not_found", productId });
+    }
+    const sellerId = input.body.sellerId === undefined ? current.seller_id : asString(input.body.sellerId) ?? null;
+    const tenantId = input.body.tenantId === undefined ? current.tenant_id : asString(input.body.tenantId) ?? null;
+    const categoryKey = input.body.categoryKey === undefined ? current.category_key : asString(input.body.categoryKey) ?? null;
+    const productType = asString(input.body.productType) ?? current.product_type;
+    const country = (asString(input.body.country) ?? current.country).toUpperCase();
+    const currency = (asString(input.body.currency) ?? current.currency).toUpperCase();
+    const basePriceAmount = input.body.basePriceAmount === undefined
+      ? current.base_price_amount === null ? null : Number(current.base_price_amount)
+      : optionalAmount(input.body.basePriceAmount);
+    const attributes = input.body.attributes ?? current.attributes;
+    const media = input.body.media ?? current.media;
+    const seo = input.body.seo ?? current.seo;
+    const slug = input.body.slug === undefined ? current.slug : asString(input.body.slug) ?? null;
+    if (
+      !catalogProductTypes.has(productType) ||
+      !validCountry(country) ||
+      !validCurrency(currency) ||
+      basePriceAmount === undefined ||
+      !jsonObject(attributes) ||
+      !Array.isArray(media) ||
+      !jsonObject(seo) ||
+      (slug !== null && !validSlug(slug))
+    ) {
+      return json(422, { status: "catalog_product_invalid" });
+    }
+    if (tenantId && !(await findTenant(client, tenantId))) {
+      return json(404, { status: "tenant_not_found", tenantId });
+    }
+    if (sellerId && !(await approvedSellerExists(client, sellerId))) {
+      return json(409, { status: "seller_not_approved", sellerId });
+    }
+    if (categoryKey && !(await categoryExists(client, categoryKey))) {
+      return json(404, { status: "catalog_category_not_found", categoryKey });
+    }
+    const saved = await client.one<CatalogProductRow>(
+      `UPDATE catalog_products
+       SET tenant_id = $2, seller_id = $3, title = $4, subtitle = $5, description = $6, product_type = $7,
+           country = $8, currency = $9, base_price_amount = $10, tax_category = $11, sku = $12, barcode = $13,
+           slug = $14, brand = $15, category_key = $16, attributes = $17::jsonb, media = $18::jsonb,
+           seo = $19::jsonb, sync_status = CASE WHEN sync_status = 'synced' THEN 'not_synced' ELSE sync_status END,
+           updated_at = now()
+       WHERE product_id = $1
+       RETURNING *`,
+      [
+        productId, tenantId, sellerId, asString(input.body.title) ?? current.title, asString(input.body.subtitle) ?? current.subtitle,
+        asString(input.body.description) ?? current.description, productType, country, currency, basePriceAmount,
+        asString(input.body.taxCategory) ?? current.tax_category, asString(input.body.sku) ?? current.sku,
+        asString(input.body.barcode) ?? current.barcode, slug, asString(input.body.brand) ?? current.brand,
+        categoryKey, attributes, media, seo
+      ]
+    );
+    if (!saved) {
+      throw new Error("catalog_product_update_failed");
+    }
+    await writeCatalogProductEvent(client, input, "catalog_product_updated", {}, productId);
+    return json(200, { status: "ok", product: serializeCatalogProduct(saved) });
+  });
+}
+
+async function handleCatalogProductSubmit(input: OperationalRouteInput, productId: string) {
+  const denied = await requireCatalogMutation(input);
+  if (denied) {
+    return denied;
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findCatalogProduct(client, productId);
+    if (!current) {
+      return json(404, { status: "catalog_product_not_found", productId });
+    }
+    if (current.status === "archived") {
+      return json(409, { status: "catalog_product_archived", productId });
+    }
+    const saved = await client.one<CatalogProductRow>(
+      `UPDATE catalog_products
+       SET moderation_status = 'pending_review', rejection_reason = NULL, rejected_at = NULL, updated_at = now()
+       WHERE product_id = $1
+       RETURNING *`,
+      [productId]
+    );
+    await writeCatalogProductEvent(client, input, "catalog_product_submitted", {}, productId);
+    return json(200, { status: "ok", product: serializeCatalogProduct(saved!) });
+  });
+}
+
+async function handleCatalogProductApprove(input: OperationalRouteInput, productId: string) {
+  const denied = await requireCatalogMutation(input);
+  if (denied) {
+    return denied;
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findCatalogProduct(client, productId);
+    if (!current) {
+      return json(404, { status: "catalog_product_not_found", productId });
+    }
+    const saved = await client.one<CatalogProductRow>(
+      `UPDATE catalog_products
+       SET status = 'active', moderation_status = 'approved', approved_by_principal_id = $2::uuid,
+           approved_at = now(), rejected_at = NULL, rejection_reason = NULL, updated_at = now()
+       WHERE product_id = $1
+       RETURNING *`,
+      [productId, actorPrincipalId(input)]
+    );
+    await writeCatalogProductEvent(client, input, "catalog_product_approved", {}, productId);
+    return json(200, { status: "ok", product: serializeCatalogProduct(saved!) });
+  });
+}
+
+async function handleCatalogProductReject(input: OperationalRouteInput, productId: string) {
+  const denied = await requireCatalogMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const reason = asString(input.body.reason);
+  if (!reason) {
+    return json(422, { status: "catalog_product_rejection_reason_required" });
+  }
+  return input.db.transaction(async (client) => {
+    if (!(await findCatalogProduct(client, productId))) {
+      return json(404, { status: "catalog_product_not_found", productId });
+    }
+    const saved = await client.one<CatalogProductRow>(
+      `UPDATE catalog_products
+       SET status = 'inactive', moderation_status = 'rejected', rejected_at = now(), rejection_reason = $2, updated_at = now()
+       WHERE product_id = $1
+       RETURNING *`,
+      [productId, reason]
+    );
+    await writeCatalogProductEvent(client, input, "catalog_product_rejected", { reason }, productId);
+    return json(200, { status: "ok", product: serializeCatalogProduct(saved!) });
+  });
+}
+
+async function handleCatalogProductArchive(input: OperationalRouteInput, productId: string) {
+  const denied = await requireCatalogMutation(input);
+  if (denied) {
+    return denied;
+  }
+  return input.db.transaction(async (client) => {
+    if (!(await findCatalogProduct(client, productId))) {
+      return json(404, { status: "catalog_product_not_found", productId });
+    }
+    const saved = await client.one<CatalogProductRow>(
+      `UPDATE catalog_products SET status = 'archived', updated_at = now() WHERE product_id = $1 RETURNING *`,
+      [productId]
+    );
+    await writeCatalogProductEvent(client, input, "catalog_product_archived", {}, productId);
+    return json(200, { status: "ok", product: serializeCatalogProduct(saved!) });
+  });
+}
+
+async function handleCatalogVariantList(input: OperationalRouteInput, productId: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  if (!(await findCatalogProduct(input.db, productId))) {
+    return json(404, { status: "catalog_product_not_found", productId });
+  }
+  return json(200, { status: "ok", variants: (await catalogVariants(input.db, productId)).map(serializeCatalogVariant) });
+}
+
+async function handleCatalogVariantCreate(input: OperationalRouteInput, productId: string) {
+  const denied = await requireCatalogMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const title = asString(input.body.title);
+  const priceAmount = optionalAmount(input.body.priceAmount);
+  const stockQuantity = optionalStock(input.body.stockQuantity);
+  const currency = asString(input.body.currency)?.toUpperCase() ?? null;
+  const attributes = input.body.attributes ?? {};
+  if (!title || priceAmount === undefined || stockQuantity === undefined || (currency !== null && !validCurrency(currency)) || !jsonObject(attributes)) {
+    return json(422, { status: "catalog_variant_invalid", required: ["title"] });
+  }
+  return input.db.transaction(async (client) => {
+    if (!(await findCatalogProduct(client, productId))) {
+      return json(404, { status: "catalog_product_not_found", productId });
+    }
+    const variantId = newCatalogResourceId("variant");
+    const saved = await client.one<CatalogProductVariantRow>(
+      `INSERT INTO catalog_product_variants
+        (product_id, variant_id, title, sku, barcode, price_amount, currency, stock_quantity, attributes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+       RETURNING *`,
+      [productId, variantId, title, asString(input.body.sku) ?? null, asString(input.body.barcode) ?? null, priceAmount, currency, stockQuantity, attributes]
+    );
+    await writeCatalogProductEvent(client, input, "catalog_variant_created", { variantId }, productId);
+    return json(201, { status: "ok", variant: serializeCatalogVariant(saved!) });
+  });
+}
+
+async function handleCatalogVariantUpdate(input: OperationalRouteInput, variantId: string) {
+  const denied = await requireCatalogMutation(input);
+  if (denied) {
+    return denied;
+  }
+  return input.db.transaction(async (client) => {
+    const current = await client.one<CatalogProductVariantRow>(
+      `SELECT * FROM catalog_product_variants WHERE variant_id = $1 LIMIT 1`,
+      [variantId]
+    );
+    if (!current) {
+      return json(404, { status: "catalog_variant_not_found", variantId });
+    }
+    const priceAmount = input.body.priceAmount === undefined
+      ? current.price_amount === null ? null : Number(current.price_amount)
+      : optionalAmount(input.body.priceAmount);
+    const stockQuantity = input.body.stockQuantity === undefined ? current.stock_quantity : optionalStock(input.body.stockQuantity);
+    const currency = (asString(input.body.currency) ?? current.currency)?.toUpperCase() ?? null;
+    const attributes = input.body.attributes ?? current.attributes;
+    if (priceAmount === undefined || stockQuantity === undefined || (currency !== null && !validCurrency(currency)) || !jsonObject(attributes)) {
+      return json(422, { status: "catalog_variant_invalid" });
+    }
+    const saved = await client.one<CatalogProductVariantRow>(
+      `UPDATE catalog_product_variants
+       SET title = $2, sku = $3, barcode = $4, price_amount = $5, currency = $6,
+           stock_quantity = $7, attributes = $8::jsonb, updated_at = now()
+       WHERE variant_id = $1
+       RETURNING *`,
+      [
+        variantId, asString(input.body.title) ?? current.title, asString(input.body.sku) ?? current.sku,
+        asString(input.body.barcode) ?? current.barcode, priceAmount, currency, stockQuantity, attributes
+      ]
+    );
+    await writeCatalogProductEvent(client, input, "catalog_variant_updated", { variantId }, current.product_id);
+    return json(200, { status: "ok", variant: serializeCatalogVariant(saved!) });
+  });
+}
+
+async function handleCatalogCategoryList(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  const [categories, moduleState] = await Promise.all([
+    input.db.query<CatalogCategoryRow>(
+      `SELECT id, category_key, parent_key, name, description, status, sort_order, seo, medusa_category_id, created_at, updated_at
+       FROM catalog_categories
+       ORDER BY sort_order, name`
+    ),
+    getCatalogModuleState(input.db)
+  ]);
+  return json(200, { status: "ok", module: moduleState, categories: categories.map(serializeCatalogCategory) });
+}
+
+async function handleCatalogCategoryCreate(input: OperationalRouteInput) {
+  const denied = await requireCatalogMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const categoryKey = asString(input.body.categoryKey);
+  const parentKey = asString(input.body.parentKey) ?? null;
+  const name = asString(input.body.name);
+  const status = asString(input.body.status) ?? "active";
+  const sortOrder = Number(input.body.sortOrder ?? 0);
+  const seo = input.body.seo ?? {};
+  if (!categoryKey || !moduleKeyPattern.test(categoryKey) || !name || !catalogCategoryStatuses.has(status) || !Number.isSafeInteger(sortOrder) || !jsonObject(seo)) {
+    return json(422, { status: "catalog_category_invalid", required: ["categoryKey", "name"] });
+  }
+  return input.db.transaction(async (client) => {
+    if (parentKey && !(await categoryExists(client, parentKey))) {
+      return json(404, { status: "catalog_parent_category_not_found", parentKey });
+    }
+    const existing = await categoryExists(client, categoryKey);
+    if (existing) {
+      return json(409, { status: "catalog_category_exists", categoryKey });
+    }
+    const saved = await client.one<CatalogCategoryRow>(
+      `INSERT INTO catalog_categories
+        (category_key, parent_key, name, description, status, sort_order, seo, medusa_category_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+       RETURNING *`,
+      [categoryKey, parentKey, name, asString(input.body.description) ?? null, status, sortOrder, seo, asString(input.body.medusaCategoryId) ?? null]
+    );
+    await writeCatalogProductEvent(client, input, "catalog_category_created", { categoryKey });
+    return json(201, { status: "ok", category: serializeCatalogCategory(saved!) });
+  });
+}
+
+async function handleCatalogCategoryUpdate(input: OperationalRouteInput, categoryKey: string) {
+  const denied = await requireCatalogMutation(input);
+  if (denied) {
+    return denied;
+  }
+  return input.db.transaction(async (client) => {
+    const current = await client.one<CatalogCategoryRow>(`SELECT * FROM catalog_categories WHERE category_key = $1 LIMIT 1`, [categoryKey]);
+    if (!current) {
+      return json(404, { status: "catalog_category_not_found", categoryKey });
+    }
+    const parentKey = input.body.parentKey === undefined ? current.parent_key : asString(input.body.parentKey) ?? null;
+    const status = asString(input.body.status) ?? current.status;
+    const sortOrder = Number(input.body.sortOrder ?? current.sort_order);
+    const seo = input.body.seo ?? current.seo;
+    if (parentKey === categoryKey || !catalogCategoryStatuses.has(status) || !Number.isSafeInteger(sortOrder) || !jsonObject(seo)) {
+      return json(422, { status: "catalog_category_invalid" });
+    }
+    if (parentKey && !(await categoryExists(client, parentKey))) {
+      return json(404, { status: "catalog_parent_category_not_found", parentKey });
+    }
+    const saved = await client.one<CatalogCategoryRow>(
+      `UPDATE catalog_categories
+       SET parent_key = $2, name = $3, description = $4, status = $5, sort_order = $6,
+           seo = $7::jsonb, medusa_category_id = $8, updated_at = now()
+       WHERE category_key = $1
+       RETURNING *`,
+      [
+        categoryKey, parentKey, asString(input.body.name) ?? current.name, asString(input.body.description) ?? current.description,
+        status, sortOrder, seo, asString(input.body.medusaCategoryId) ?? current.medusa_category_id
+      ]
+    );
+    await writeCatalogProductEvent(client, input, "catalog_category_updated", { categoryKey });
+    return json(200, { status: "ok", category: serializeCatalogCategory(saved!) });
+  });
+}
+
+async function handleCatalogProductEvents(input: OperationalRouteInput, productId: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  if (!(await findCatalogProduct(input.db, productId))) {
+    return json(404, { status: "catalog_product_not_found", productId });
+  }
+  const events = await input.db.query<CatalogProductEventRow>(
+    `SELECT id, product_id, event_type, actor_principal_id, payload, created_at
+     FROM catalog_product_events
+     WHERE product_id = $1
+     ORDER BY created_at DESC
+     LIMIT 100`,
+    [productId]
+  );
+  return json(200, { status: "ok", events });
+}
+
+async function handleCatalogMedusaSyncJobs(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  return json(200, { status: "ok", syncJobs: (await catalogSyncJobs(input.db)).map(serializeCatalogSyncJob), medusaHealth: await catalogMedusaHealth(input) });
+}
+
+async function handleCatalogQueueMedusaSync(input: OperationalRouteInput, productId: string) {
+  const denied = await requireCatalogMutation(input);
+  if (denied) {
+    return denied;
+  }
+  if (!(await findCatalogProduct(input.db, productId))) {
+    return json(404, { status: "catalog_product_not_found", productId });
+  }
+  const medusaHealth = await catalogMedusaHealth(input);
+  if (medusaHealth.status !== "ok") {
+    await writeCatalogProductEvent(input.db, input, "catalog_medusa_sync_blocked", { reason: "medusa_unavailable" }, productId);
+    return json(503, { status: "medusa_unavailable", medusaHealth });
+  }
+  return input.db.transaction(async (client) => {
+    const product = await findCatalogProduct(client, productId);
+    if (!product) {
+      return json(404, { status: "catalog_product_not_found", productId });
+    }
+    if (product.moderation_status !== "approved") {
+      await writeCatalogProductEvent(client, input, "catalog_medusa_sync_blocked", { reason: "product_not_approved" }, productId);
+      return json(409, { status: "catalog_product_not_approved", productId });
+    }
+    const variants = await catalogVariants(client, productId);
+    const jobId = newCatalogResourceId("job");
+    const snapshot = {
+      product: serializeCatalogProduct(product),
+      variants: variants.map(serializeCatalogVariant),
+      queuedAt: new Date().toISOString()
+    };
+    const job = await client.one<CatalogMedusaSyncJobRow>(
+      `INSERT INTO catalog_medusa_sync_jobs
+        (job_id, product_id, job_type, status, payload, result)
+       VALUES ($1, $2, 'catalog_product_sync', 'queued', $3::jsonb, '{}'::jsonb)
+       RETURNING *`,
+      [jobId, productId, snapshot]
+    );
+    await client.query(`UPDATE catalog_products SET sync_status = 'queued', updated_at = now() WHERE product_id = $1`, [productId]);
+    await writeCatalogProductEvent(client, input, "catalog_medusa_sync_queued", { jobId }, productId);
+    return json(200, { status: "ok", directMedusaWritePerformed: false, syncJob: serializeCatalogSyncJob(job!), medusaHealth });
+  });
+}
+
+function parseCatalogPath(pathname: string) {
+  const parts = pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  if (parts[0] !== "v1" || parts[1] !== "catalog" || !parts[2]) {
+    return null;
+  }
+  if (parts[2] === "products") {
+    return parts[3]
+      ? marketplaceResourceIdPattern.test(parts[3])
+        ? { resource: "products", collection: false, id: parts[3], action: parts[4], extra: parts.slice(5) } as const
+        : null
+      : { resource: "products", collection: true } as const;
+  }
+  if (parts[2] === "variants") {
+    return parts[3] && marketplaceResourceIdPattern.test(parts[3])
+      ? { resource: "variants", collection: false, id: parts[3], action: parts[4], extra: parts.slice(5) } as const
+      : null;
+  }
+  if (parts[2] === "categories") {
+    return parts[3]
+      ? moduleKeyPattern.test(parts[3])
+        ? { resource: "categories", collection: false, id: parts[3], action: parts[4], extra: parts.slice(5) } as const
+        : null
+      : { resource: "categories", collection: true } as const;
+  }
+  if (parts[2] === "medusa-sync-jobs" && parts.length === 3) {
+    return { resource: "medusa-sync-jobs", collection: true } as const;
+  }
+  return null;
+}
+
+async function handleCatalogRoute(input: OperationalRouteInput) {
+  try {
+    const parsed = parseCatalogPath(input.pathname);
+    if (!parsed) {
+      return json(404, { status: "catalog_route_not_found", path: input.pathname });
+    }
+    if (parsed.resource === "products") {
+      if (parsed.collection) {
+        if (input.method === "GET") return handleCatalogProductList(input);
+        if (input.method === "POST") return handleCatalogProductCreate(input);
+      } else {
+        if (!parsed.action && input.method === "GET") return handleCatalogProductDetail(input, parsed.id);
+        if (!parsed.action && input.method === "PATCH") return handleCatalogProductUpdate(input, parsed.id);
+        if (parsed.action === "submit" && input.method === "POST" && parsed.extra.length === 0) return handleCatalogProductSubmit(input, parsed.id);
+        if (parsed.action === "approve" && input.method === "POST" && parsed.extra.length === 0) return handleCatalogProductApprove(input, parsed.id);
+        if (parsed.action === "reject" && input.method === "POST" && parsed.extra.length === 0) return handleCatalogProductReject(input, parsed.id);
+        if (parsed.action === "archive" && input.method === "POST" && parsed.extra.length === 0) return handleCatalogProductArchive(input, parsed.id);
+        if (parsed.action === "variants" && input.method === "GET" && parsed.extra.length === 0) return handleCatalogVariantList(input, parsed.id);
+        if (parsed.action === "variants" && input.method === "POST" && parsed.extra.length === 0) return handleCatalogVariantCreate(input, parsed.id);
+        if (parsed.action === "events" && input.method === "GET" && parsed.extra.length === 0) return handleCatalogProductEvents(input, parsed.id);
+        if (parsed.action === "queue-medusa-sync" && input.method === "POST" && parsed.extra.length === 0) return handleCatalogQueueMedusaSync(input, parsed.id);
+      }
+    }
+    if (parsed.resource === "variants" && !parsed.collection && !parsed.action && input.method === "PATCH") {
+      return handleCatalogVariantUpdate(input, parsed.id);
+    }
+    if (parsed.resource === "categories") {
+      if (parsed.collection) {
+        if (input.method === "GET") return handleCatalogCategoryList(input);
+        if (input.method === "POST") return handleCatalogCategoryCreate(input);
+      } else if (!parsed.action && input.method === "PATCH") {
+        return handleCatalogCategoryUpdate(input, parsed.id);
+      }
+    }
+    if (parsed.resource === "medusa-sync-jobs" && parsed.collection && input.method === "GET") {
+      return handleCatalogMedusaSyncJobs(input);
+    }
+    return json(404, { status: "catalog_route_not_found", path: input.pathname });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "catalog.products" });
+    }
+    throw error;
+  }
+}
+
 async function findTheme(db: RuntimeDatabase | RuntimeDatabaseClient, key: string) {
   return db.one<PlatformThemeRow>(
     `SELECT id, key, name, description, industry, category, status, version, is_core, is_premium,
@@ -4809,6 +5707,7 @@ export function isOperationalRuntimeRoute(pathname: string) {
     pathname.startsWith("/v1/plugins/") ||
     pathname.startsWith("/v1/integrations/") ||
     pathname.startsWith("/v1/marketplace/") ||
+    pathname.startsWith("/v1/catalog/") ||
     pathname === "/v1/themes" ||
     pathname.startsWith("/v1/themes/") ||
     pathname === "/v1/tenants" ||
@@ -4843,6 +5742,10 @@ export async function handleOperationalRoute(input: OperationalRouteInput): Prom
 
   if (input.pathname.startsWith("/v1/marketplace/")) {
     return handleMarketplaceRoute(input);
+  }
+
+  if (input.pathname.startsWith("/v1/catalog/")) {
+    return handleCatalogRoute(input);
   }
 
   if (input.pathname === "/v1/themes" || input.pathname.startsWith("/v1/themes/")) {
