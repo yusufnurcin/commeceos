@@ -393,12 +393,12 @@ const workspaceSeeds: readonly WorkspaceSeed[] = [
     group: "Commerce",
     moduleKey: "orders",
     permissionPrefix: "orders",
-    status: "requires-medusa",
+    status: "runtime-ready",
     refs: ["PDF: Sipariş Yönetimi", "PDF: Checkout ödeme gate"],
     items: [
-      { segment: "/orders", label: "Global Siparişler", description: "Tenant ve satıcı kapsamlı sipariş denetimi.", status: "requires-medusa", engine: "medusa", permission: "orders.global.view" },
-      { segment: "/orders/returns", label: "İade ve Değişim", description: "Return, exchange ve kısmi iade talepleri.", status: "requires-medusa", engine: "medusa", permission: "orders.returns.manage" },
-      { segment: "/orders/refunds", label: "Refundlar", description: "Refund, chargeback ve dispute akışları.", status: "planned", permission: "orders.refunds.manage", moduleKey: "finance" },
+      { segment: "/orders", label: "Global Siparişler", description: "Tenant ve satıcı kapsamlı sipariş denetimi.", status: "runtime-ready", engine: "medusa", permission: "orders.global.view" },
+      { segment: "/orders/returns", label: "İade ve Değişim", description: "Return, exchange ve kısmi iade talepleri.", status: "runtime-ready", engine: "medusa", permission: "orders.returns.manage" },
+      { segment: "/orders/refunds", label: "Refundlar", description: "Refund talepleri ve iç operasyon kararları.", status: "runtime-ready", permission: "orders.refunds.manage" },
       { segment: "/orders/fraud", label: "Fraud Şüpheli Siparişler", description: "Fraud kuralları, risk ve müdahale kuyruğu.", status: "planned", permission: "orders.fraud.review", moduleKey: "security", risk: "high" },
       { segment: "/orders/digital", label: "Dijital Siparişler", description: "Dijital teslimat, lisans ve abonelik siparişleri.", status: "planned", permission: "orders.digital.view" }
     ]

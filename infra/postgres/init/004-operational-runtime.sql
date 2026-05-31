@@ -478,6 +478,121 @@ CREATE TABLE IF NOT EXISTS catalog_medusa_sync_jobs (
   CONSTRAINT catalog_medusa_sync_jobs_attempt_check CHECK (attempt_count >= 0)
 );
 
+CREATE TABLE IF NOT EXISTS commerce_orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id text NOT NULL UNIQUE,
+  tenant_id text REFERENCES tenant_registry.tenants(tenant_id) ON DELETE SET NULL,
+  seller_id text REFERENCES marketplace_sellers(seller_id) ON DELETE SET NULL,
+  customer_id text,
+  source text NOT NULL,
+  status text NOT NULL DEFAULT 'draft',
+  payment_status text NOT NULL DEFAULT 'unpaid',
+  fulfillment_status text NOT NULL DEFAULT 'unfulfilled',
+  risk_status text NOT NULL DEFAULT 'normal',
+  currency text NOT NULL,
+  subtotal_amount numeric(18, 4) NOT NULL DEFAULT 0,
+  tax_amount numeric(18, 4) NOT NULL DEFAULT 0,
+  shipping_amount numeric(18, 4) NOT NULL DEFAULT 0,
+  discount_amount numeric(18, 4) NOT NULL DEFAULT 0,
+  total_amount numeric(18, 4) NOT NULL DEFAULT 0,
+  customer_email text,
+  customer_phone text,
+  billing_address jsonb NOT NULL DEFAULT '{}'::jsonb,
+  shipping_address jsonb NOT NULL DEFAULT '{}'::jsonb,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  medusa_order_id text,
+  created_by_principal_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT commerce_orders_status_check CHECK (status IN ('draft', 'placed', 'confirmed', 'processing', 'completed', 'cancelled', 'archived')),
+  CONSTRAINT commerce_orders_payment_status_check CHECK (payment_status IN ('unpaid', 'authorized', 'paid', 'partially_refunded', 'refunded', 'failed')),
+  CONSTRAINT commerce_orders_fulfillment_status_check CHECK (fulfillment_status IN ('unfulfilled', 'partially_fulfilled', 'fulfilled', 'returned', 'cancelled')),
+  CONSTRAINT commerce_orders_risk_status_check CHECK (risk_status IN ('normal', 'watch', 'high', 'blocked')),
+  CONSTRAINT commerce_orders_amounts_check CHECK (
+    subtotal_amount >= 0 AND tax_amount >= 0 AND shipping_amount >= 0 AND
+    discount_amount >= 0 AND total_amount >= 0
+  )
+);
+
+CREATE TABLE IF NOT EXISTS commerce_order_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id text NOT NULL REFERENCES commerce_orders(order_id) ON DELETE CASCADE,
+  item_id text NOT NULL UNIQUE,
+  product_id text REFERENCES catalog_products(product_id) ON DELETE SET NULL,
+  variant_id text REFERENCES catalog_product_variants(variant_id) ON DELETE SET NULL,
+  seller_id text REFERENCES marketplace_sellers(seller_id) ON DELETE SET NULL,
+  title text NOT NULL,
+  sku text,
+  quantity integer NOT NULL,
+  unit_price_amount numeric(18, 4) NOT NULL,
+  tax_amount numeric(18, 4) NOT NULL DEFAULT 0,
+  discount_amount numeric(18, 4) NOT NULL DEFAULT 0,
+  total_amount numeric(18, 4) NOT NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT commerce_order_items_quantity_check CHECK (quantity > 0),
+  CONSTRAINT commerce_order_items_amounts_check CHECK (
+    unit_price_amount >= 0 AND tax_amount >= 0 AND discount_amount >= 0 AND total_amount >= 0
+  )
+);
+
+CREATE TABLE IF NOT EXISTS commerce_order_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id text REFERENCES commerce_orders(order_id) ON DELETE SET NULL,
+  event_type text NOT NULL,
+  actor_principal_id uuid,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS commerce_order_returns (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  return_id text NOT NULL UNIQUE,
+  order_id text NOT NULL REFERENCES commerce_orders(order_id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'requested',
+  reason text,
+  requested_by_principal_id uuid,
+  reviewed_by_principal_id uuid,
+  reviewed_at timestamptz,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT commerce_order_returns_status_check CHECK (status IN ('requested', 'approved', 'rejected', 'received', 'completed', 'cancelled'))
+);
+
+CREATE TABLE IF NOT EXISTS commerce_order_refunds (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  refund_id text NOT NULL UNIQUE,
+  order_id text NOT NULL REFERENCES commerce_orders(order_id) ON DELETE CASCADE,
+  return_id text REFERENCES commerce_order_returns(return_id) ON DELETE SET NULL,
+  status text NOT NULL DEFAULT 'pending',
+  amount numeric(18, 4) NOT NULL,
+  currency text NOT NULL,
+  reason text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT commerce_order_refunds_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'processed', 'failed')),
+  CONSTRAINT commerce_order_refunds_amount_check CHECK (amount >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS commerce_medusa_order_sync_jobs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id text NOT NULL UNIQUE,
+  order_id text REFERENCES commerce_orders(order_id) ON DELETE SET NULL,
+  job_type text NOT NULL,
+  status text NOT NULL DEFAULT 'queued',
+  attempt_count integer NOT NULL DEFAULT 0,
+  last_error text,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  result jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT commerce_medusa_order_sync_jobs_status_check CHECK (status IN ('queued', 'processing', 'completed', 'failed', 'cancelled')),
+  CONSTRAINT commerce_medusa_order_sync_jobs_attempt_check CHECK (attempt_count >= 0)
+);
+
 CREATE TABLE IF NOT EXISTS platform_themes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   key text NOT NULL UNIQUE,
@@ -579,6 +694,18 @@ CREATE INDEX IF NOT EXISTS catalog_categories_parent_idx ON catalog_categories (
 CREATE INDEX IF NOT EXISTS catalog_product_events_product_idx ON catalog_product_events (product_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS catalog_medusa_sync_jobs_product_idx ON catalog_medusa_sync_jobs (product_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS catalog_medusa_sync_jobs_status_idx ON catalog_medusa_sync_jobs (status, created_at);
+CREATE INDEX IF NOT EXISTS commerce_orders_status_idx ON commerce_orders (status, payment_status, fulfillment_status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS commerce_orders_tenant_idx ON commerce_orders (tenant_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS commerce_orders_seller_idx ON commerce_orders (seller_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS commerce_order_items_order_idx ON commerce_order_items (order_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS commerce_order_items_product_idx ON commerce_order_items (product_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS commerce_order_events_order_idx ON commerce_order_events (order_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS commerce_order_returns_order_idx ON commerce_order_returns (order_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS commerce_order_returns_status_idx ON commerce_order_returns (status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS commerce_order_refunds_order_idx ON commerce_order_refunds (order_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS commerce_order_refunds_status_idx ON commerce_order_refunds (status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS commerce_medusa_order_sync_jobs_order_idx ON commerce_medusa_order_sync_jobs (order_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS commerce_medusa_order_sync_jobs_status_idx ON commerce_medusa_order_sync_jobs (status, created_at);
 CREATE INDEX IF NOT EXISTS platform_themes_industry_category_idx ON platform_themes (industry, category, status);
 CREATE INDEX IF NOT EXISTS platform_theme_assignments_theme_idx ON platform_theme_assignments (theme_id, status);
 CREATE INDEX IF NOT EXISTS platform_theme_events_tenant_idx ON platform_theme_events (tenant_id, created_at DESC);

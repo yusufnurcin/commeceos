@@ -462,6 +462,105 @@ interface CatalogMedusaSyncJobRow {
   readonly updated_at: Date | string;
 }
 
+interface CommerceOrderRow {
+  readonly id: string;
+  readonly order_id: string;
+  readonly tenant_id: string | null;
+  readonly seller_id: string | null;
+  readonly customer_id: string | null;
+  readonly source: string;
+  readonly status: string;
+  readonly payment_status: string;
+  readonly fulfillment_status: string;
+  readonly risk_status: string;
+  readonly currency: string;
+  readonly subtotal_amount: number | string;
+  readonly tax_amount: number | string;
+  readonly shipping_amount: number | string;
+  readonly discount_amount: number | string;
+  readonly total_amount: number | string;
+  readonly customer_email: string | null;
+  readonly customer_phone: string | null;
+  readonly billing_address: unknown;
+  readonly shipping_address: unknown;
+  readonly metadata: unknown;
+  readonly medusa_order_id: string | null;
+  readonly created_by_principal_id: string | null;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+  readonly item_count?: number;
+}
+
+interface CommerceOrderItemRow {
+  readonly id: string;
+  readonly order_id: string;
+  readonly item_id: string;
+  readonly product_id: string | null;
+  readonly variant_id: string | null;
+  readonly seller_id: string | null;
+  readonly title: string;
+  readonly sku: string | null;
+  readonly quantity: number;
+  readonly unit_price_amount: number | string;
+  readonly tax_amount: number | string;
+  readonly discount_amount: number | string;
+  readonly total_amount: number | string;
+  readonly metadata: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
+interface CommerceOrderEventRow {
+  readonly id: string;
+  readonly order_id: string | null;
+  readonly event_type: string;
+  readonly actor_principal_id: string | null;
+  readonly payload: unknown;
+  readonly created_at: Date | string;
+}
+
+interface CommerceOrderReturnRow {
+  readonly id: string;
+  readonly return_id: string;
+  readonly order_id: string;
+  readonly status: string;
+  readonly reason: string | null;
+  readonly requested_by_principal_id: string | null;
+  readonly reviewed_by_principal_id: string | null;
+  readonly reviewed_at: Date | string | null;
+  readonly metadata: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
+interface CommerceOrderRefundRow {
+  readonly id: string;
+  readonly refund_id: string;
+  readonly order_id: string;
+  readonly return_id: string | null;
+  readonly status: string;
+  readonly amount: number | string;
+  readonly currency: string;
+  readonly reason: string | null;
+  readonly metadata: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
+interface CommerceMedusaOrderSyncJobRow {
+  readonly id: string;
+  readonly job_id: string;
+  readonly order_id: string | null;
+  readonly job_type: string;
+  readonly status: string;
+  readonly attempt_count: number;
+  readonly last_error: string | null;
+  readonly payload: unknown;
+  readonly result: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const moduleKeyPattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 const credentialFieldKeyPattern = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
@@ -469,6 +568,10 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const marketplaceResourceIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,127}$/;
 const catalogProductTypes = new Set(["physical", "digital", "service", "subscription", "bundle", "auction", "rental"]);
 const catalogCategoryStatuses = new Set(["active", "inactive", "archived"]);
+const commerceOrderStatuses = new Set(["draft", "placed", "confirmed", "processing", "completed", "cancelled", "archived"]);
+const commerceOrderPaymentStatuses = new Set(["unpaid", "authorized", "paid", "partially_refunded", "refunded", "failed"]);
+const commerceOrderFulfillmentStatuses = new Set(["unfulfilled", "partially_fulfilled", "fulfilled", "returned", "cancelled"]);
+const commerceOrderRiskStatuses = new Set(["normal", "watch", "high", "blocked"]);
 
 export const publicAuthRuntimePaths = new Set([
   "/v1/auth/login",
@@ -796,6 +899,25 @@ async function writeCatalogProductEvent(
   );
   await writeAudit(db, input, eventType, "accepted", {
     productId: productId ?? null,
+    ...payload
+  });
+}
+
+async function writeCommerceOrderEvent(
+  db: RuntimeDatabase | RuntimeDatabaseClient,
+  input: OperationalRouteInput,
+  eventType: string,
+  payload: JsonRecord = {},
+  orderId?: string | null
+) {
+  await db.query(
+    `INSERT INTO commerce_order_events
+      (order_id, event_type, actor_principal_id, payload)
+     VALUES ($1, $2, $3::uuid, $4::jsonb)`,
+    [orderId ?? null, eventType, actorPrincipalId(input), payload]
+  );
+  await writeAudit(db, input, eventType, "accepted", {
+    orderId: orderId ?? null,
     ...payload
   });
 }
@@ -1250,6 +1372,103 @@ function serializeCatalogSyncJob(row: CatalogMedusaSyncJobRow) {
     id: row.id,
     jobId: row.job_id,
     productId: row.product_id,
+    jobType: row.job_type,
+    status: row.status,
+    attemptCount: row.attempt_count,
+    lastError: row.last_error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeCommerceOrder(row: CommerceOrderRow) {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    tenantId: row.tenant_id,
+    sellerId: row.seller_id,
+    customerId: row.customer_id,
+    source: row.source,
+    status: row.status,
+    paymentStatus: row.payment_status,
+    fulfillmentStatus: row.fulfillment_status,
+    riskStatus: row.risk_status,
+    currency: row.currency,
+    subtotalAmount: Number(row.subtotal_amount),
+    taxAmount: Number(row.tax_amount),
+    shippingAmount: Number(row.shipping_amount),
+    discountAmount: Number(row.discount_amount),
+    totalAmount: Number(row.total_amount),
+    customerEmail: row.customer_email,
+    customerPhone: row.customer_phone,
+    billingAddress: row.billing_address,
+    shippingAddress: row.shipping_address,
+    metadata: row.metadata,
+    medusaOrderId: row.medusa_order_id,
+    itemCount: Number(row.item_count ?? 0),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeCommerceOrderItem(row: CommerceOrderItemRow) {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    itemId: row.item_id,
+    productId: row.product_id,
+    variantId: row.variant_id,
+    sellerId: row.seller_id,
+    title: row.title,
+    sku: row.sku,
+    quantity: row.quantity,
+    unitPriceAmount: Number(row.unit_price_amount),
+    taxAmount: Number(row.tax_amount),
+    discountAmount: Number(row.discount_amount),
+    totalAmount: Number(row.total_amount),
+    metadata: row.metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeCommerceOrderReturn(row: CommerceOrderReturnRow) {
+  return {
+    id: row.id,
+    returnId: row.return_id,
+    orderId: row.order_id,
+    status: row.status,
+    reason: row.reason,
+    requestedByPrincipalId: row.requested_by_principal_id,
+    reviewedByPrincipalId: row.reviewed_by_principal_id,
+    reviewedAt: row.reviewed_at,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeCommerceOrderRefund(row: CommerceOrderRefundRow) {
+  return {
+    id: row.id,
+    refundId: row.refund_id,
+    orderId: row.order_id,
+    returnId: row.return_id,
+    status: row.status,
+    amount: Number(row.amount),
+    currency: row.currency,
+    reason: row.reason,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeCommerceOrderSyncJob(row: CommerceMedusaOrderSyncJobRow) {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    orderId: row.order_id,
     jobType: row.job_type,
     status: row.status,
     attemptCount: row.attempt_count,
@@ -4588,6 +4807,710 @@ async function handleCatalogRoute(input: OperationalRouteInput) {
   }
 }
 
+async function getOrdersModuleState(db: RuntimeDatabase | RuntimeDatabaseClient) {
+  const row = await findModule(db, "orders");
+  return row ? serializeModule(row) : null;
+}
+
+async function requireOrdersMutation(input: OperationalRouteInput, db: RuntimeDatabase | RuntimeDatabaseClient = input.db) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  const moduleState = await getOrdersModuleState(db);
+  if (!moduleState?.isEnabled) {
+    await writeAudit(db, input, "orders_module_required", "rejected", { moduleKey: "orders" });
+    return json(409, {
+      status: "orders_module_required",
+      moduleKey: "orders",
+      message: "Siparis islemleri icin orders modulunu Modul Merkezi uzerinden aktif edin."
+    });
+  }
+
+  return null;
+}
+
+function newCommerceOrderResourceId(prefix: "order" | "item" | "return" | "refund" | "orderjob") {
+  return `${prefix}_${randomUUID().replace(/-/g, "")}`;
+}
+
+function requiredPositiveInteger(value: unknown) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function calculateOrderTotal(subtotalAmount: number, taxAmount: number, shippingAmount: number, discountAmount: number) {
+  const total = subtotalAmount + taxAmount + shippingAmount - discountAmount;
+  return total >= 0 ? total : undefined;
+}
+
+async function findCommerceOrder(db: RuntimeDatabase | RuntimeDatabaseClient, orderId: string) {
+  return db.one<CommerceOrderRow>(
+    `SELECT o.*, count(i.id)::int AS item_count
+     FROM commerce_orders o
+     LEFT JOIN commerce_order_items i ON i.order_id = o.order_id
+     WHERE o.order_id = $1
+     GROUP BY o.id
+     LIMIT 1`,
+    [orderId]
+  );
+}
+
+async function commerceOrderItems(db: RuntimeDatabase | RuntimeDatabaseClient, orderId: string) {
+  return db.query<CommerceOrderItemRow>(
+    `SELECT id, order_id, item_id, product_id, variant_id, seller_id, title, sku, quantity,
+            unit_price_amount, tax_amount, discount_amount, total_amount, metadata, created_at, updated_at
+     FROM commerce_order_items
+     WHERE order_id = $1
+     ORDER BY created_at`,
+    [orderId]
+  );
+}
+
+async function commerceOrderReturns(db: RuntimeDatabase | RuntimeDatabaseClient, orderId?: string) {
+  return db.query<CommerceOrderReturnRow>(
+    `SELECT id, return_id, order_id, status, reason, requested_by_principal_id, reviewed_by_principal_id,
+            reviewed_at, metadata, created_at, updated_at
+     FROM commerce_order_returns
+     WHERE ($1::text IS NULL OR order_id = $1)
+     ORDER BY created_at DESC
+     LIMIT 100`,
+    [orderId ?? null]
+  );
+}
+
+async function commerceOrderRefunds(db: RuntimeDatabase | RuntimeDatabaseClient, orderId?: string) {
+  return db.query<CommerceOrderRefundRow>(
+    `SELECT id, refund_id, order_id, return_id, status, amount, currency, reason, metadata, created_at, updated_at
+     FROM commerce_order_refunds
+     WHERE ($1::text IS NULL OR order_id = $1)
+     ORDER BY created_at DESC
+     LIMIT 100`,
+    [orderId ?? null]
+  );
+}
+
+async function commerceOrderSyncJobs(db: RuntimeDatabase | RuntimeDatabaseClient, orderId?: string) {
+  return db.query<CommerceMedusaOrderSyncJobRow>(
+    `SELECT id, job_id, order_id, job_type, status, attempt_count, last_error, payload, result, created_at, updated_at
+     FROM commerce_medusa_order_sync_jobs
+     WHERE ($1::text IS NULL OR order_id = $1)
+     ORDER BY created_at DESC
+     LIMIT 100`,
+    [orderId ?? null]
+  );
+}
+
+async function catalogProductExists(db: RuntimeDatabase | RuntimeDatabaseClient, productId: string) {
+  return db.one<{ readonly product_id: string }>(
+    `SELECT product_id FROM catalog_products WHERE product_id = $1 LIMIT 1`,
+    [productId]
+  );
+}
+
+async function catalogVariantExists(db: RuntimeDatabase | RuntimeDatabaseClient, productId: string | null, variantId: string) {
+  return db.one<{ readonly variant_id: string }>(
+    `SELECT variant_id
+     FROM catalog_product_variants
+     WHERE variant_id = $1 AND ($2::text IS NULL OR product_id = $2)
+     LIMIT 1`,
+    [variantId, productId]
+  );
+}
+
+async function recomputeCommerceOrderTotals(db: RuntimeDatabaseClient, orderId: string) {
+  return db.one<CommerceOrderRow>(
+    `UPDATE commerce_orders o
+     SET subtotal_amount = totals.subtotal_amount,
+         tax_amount = totals.tax_amount,
+         discount_amount = totals.discount_amount,
+         total_amount = totals.item_total_amount + o.shipping_amount,
+         updated_at = now()
+     FROM (
+       SELECT order_id,
+              COALESCE(sum(quantity * unit_price_amount), 0) AS subtotal_amount,
+              COALESCE(sum(tax_amount), 0) AS tax_amount,
+              COALESCE(sum(discount_amount), 0) AS discount_amount,
+              COALESCE(sum(total_amount), 0) AS item_total_amount
+       FROM commerce_order_items
+       WHERE order_id = $1
+       GROUP BY order_id
+     ) totals
+     WHERE o.order_id = totals.order_id AND o.order_id = $1
+     RETURNING o.*`,
+    [orderId]
+  );
+}
+
+async function handleCommerceOrderList(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  const [orders, moduleState, medusaHealth] = await Promise.all([
+    input.db.query<CommerceOrderRow>(
+      `SELECT o.*, count(i.id)::int AS item_count
+       FROM commerce_orders o
+       LEFT JOIN commerce_order_items i ON i.order_id = o.order_id
+       GROUP BY o.id
+       ORDER BY o.updated_at DESC`
+    ),
+    getOrdersModuleState(input.db),
+    catalogMedusaHealth(input)
+  ]);
+  return json(200, {
+    status: "ok",
+    module: moduleState,
+    moduleWarning: moduleState?.isEnabled === false ? "orders_module_disabled" : undefined,
+    medusaHealth,
+    orders: orders.map(serializeCommerceOrder)
+  });
+}
+
+async function handleCommerceOrderDetail(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  const order = await findCommerceOrder(input.db, orderId);
+  if (!order) {
+    return json(404, { status: "order_not_found", orderId });
+  }
+  const [items, returns, refunds, events, syncJobs, medusaHealth] = await Promise.all([
+    commerceOrderItems(input.db, orderId),
+    commerceOrderReturns(input.db, orderId),
+    commerceOrderRefunds(input.db, orderId),
+    input.db.query<CommerceOrderEventRow>(
+      `SELECT id, order_id, event_type, actor_principal_id, payload, created_at
+       FROM commerce_order_events
+       WHERE order_id = $1
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [orderId]
+    ),
+    commerceOrderSyncJobs(input.db, orderId),
+    catalogMedusaHealth(input)
+  ]);
+  return json(200, {
+    status: "ok",
+    order: serializeCommerceOrder(order),
+    items: items.map(serializeCommerceOrderItem),
+    returns: returns.map(serializeCommerceOrderReturn),
+    refunds: refunds.map(serializeCommerceOrderRefund),
+    events,
+    syncJobs: syncJobs.map(serializeCommerceOrderSyncJob),
+    medusaHealth
+  });
+}
+
+async function handleCommerceOrderCreate(input: OperationalRouteInput) {
+  const denied = await requireOrdersMutation(input);
+  if (denied) {
+    return denied;
+  }
+  const source = asString(input.body.source);
+  const currency = asString(input.body.currency)?.toUpperCase();
+  const subtotalAmount = optionalAmount(input.body.subtotalAmount ?? 0);
+  const taxAmount = optionalAmount(input.body.taxAmount ?? 0);
+  const shippingAmount = optionalAmount(input.body.shippingAmount ?? 0);
+  const discountAmount = optionalAmount(input.body.discountAmount ?? 0);
+  const sellerId = asString(input.body.sellerId) ?? null;
+  const tenantId = asString(input.body.tenantId) ?? null;
+  const billingAddress = input.body.billingAddress ?? {};
+  const shippingAddress = input.body.shippingAddress ?? {};
+  const metadata = input.body.metadata ?? {};
+  const totalAmount =
+    subtotalAmount === null || subtotalAmount === undefined ||
+    taxAmount === null || taxAmount === undefined ||
+    shippingAmount === null || shippingAmount === undefined ||
+    discountAmount === null || discountAmount === undefined
+      ? undefined
+      : calculateOrderTotal(subtotalAmount, taxAmount, shippingAmount, discountAmount);
+  if (!source || !currency || !validCurrency(currency) || totalAmount === undefined || !jsonObject(billingAddress) || !jsonObject(shippingAddress) || !jsonObject(metadata)) {
+    return json(422, { status: "order_invalid", required: ["source", "currency"] });
+  }
+  return input.db.transaction(async (client) => {
+    if (tenantId && !(await findTenant(client, tenantId))) {
+      return json(404, { status: "tenant_not_found", tenantId });
+    }
+    if (sellerId && !(await approvedSellerExists(client, sellerId))) {
+      return json(409, { status: "seller_not_approved", sellerId });
+    }
+    const orderId = newCommerceOrderResourceId("order");
+    const saved = await client.one<CommerceOrderRow>(
+      `INSERT INTO commerce_orders
+        (order_id, tenant_id, seller_id, customer_id, source, currency, subtotal_amount, tax_amount, shipping_amount,
+         discount_amount, total_amount, customer_email, customer_phone, billing_address, shipping_address, metadata,
+         created_by_principal_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb, $16::jsonb, $17::uuid)
+       RETURNING *`,
+      [
+        orderId, tenantId, sellerId, asString(input.body.customerId) ?? null, source, currency, subtotalAmount, taxAmount,
+        shippingAmount, discountAmount, totalAmount, asString(input.body.customerEmail) ?? null,
+        asString(input.body.customerPhone) ?? null, billingAddress, shippingAddress, metadata, actorPrincipalId(input)
+      ]
+    );
+    await writeCommerceOrderEvent(client, input, "order_created", { source, currency, paymentCaptured: false }, orderId);
+    return json(201, { status: "ok", order: serializeCommerceOrder(saved!) });
+  });
+}
+
+async function handleCommerceOrderUpdate(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireOrdersMutation(input);
+  if (denied) {
+    return denied;
+  }
+  return input.db.transaction(async (client) => {
+    const current = await findCommerceOrder(client, orderId);
+    if (!current) {
+      return json(404, { status: "order_not_found", orderId });
+    }
+    const tenantId = input.body.tenantId === undefined ? current.tenant_id : asString(input.body.tenantId) ?? null;
+    const sellerId = input.body.sellerId === undefined ? current.seller_id : asString(input.body.sellerId) ?? null;
+    const status = asString(input.body.status) ?? current.status;
+    const paymentStatus = asString(input.body.paymentStatus) ?? current.payment_status;
+    const fulfillmentStatus = asString(input.body.fulfillmentStatus) ?? current.fulfillment_status;
+    const riskStatus = asString(input.body.riskStatus) ?? current.risk_status;
+    const currency = (asString(input.body.currency) ?? current.currency).toUpperCase();
+    const subtotalAmount = input.body.subtotalAmount === undefined ? Number(current.subtotal_amount) : optionalAmount(input.body.subtotalAmount);
+    const taxAmount = input.body.taxAmount === undefined ? Number(current.tax_amount) : optionalAmount(input.body.taxAmount);
+    const shippingAmount = input.body.shippingAmount === undefined ? Number(current.shipping_amount) : optionalAmount(input.body.shippingAmount);
+    const discountAmount = input.body.discountAmount === undefined ? Number(current.discount_amount) : optionalAmount(input.body.discountAmount);
+    const billingAddress = input.body.billingAddress ?? current.billing_address;
+    const shippingAddress = input.body.shippingAddress ?? current.shipping_address;
+    const metadata = input.body.metadata ?? current.metadata;
+    const totalAmount =
+      subtotalAmount === null || subtotalAmount === undefined ||
+      taxAmount === null || taxAmount === undefined ||
+      shippingAmount === null || shippingAmount === undefined ||
+      discountAmount === null || discountAmount === undefined
+        ? undefined
+        : calculateOrderTotal(subtotalAmount, taxAmount, shippingAmount, discountAmount);
+    if (
+      !commerceOrderStatuses.has(status) || !commerceOrderPaymentStatuses.has(paymentStatus) ||
+      !commerceOrderFulfillmentStatuses.has(fulfillmentStatus) || !commerceOrderRiskStatuses.has(riskStatus) ||
+      !validCurrency(currency) || totalAmount === undefined || !jsonObject(billingAddress) ||
+      !jsonObject(shippingAddress) || !jsonObject(metadata)
+    ) {
+      return json(422, { status: "order_invalid" });
+    }
+    if (tenantId && !(await findTenant(client, tenantId))) {
+      return json(404, { status: "tenant_not_found", tenantId });
+    }
+    if (sellerId && !(await approvedSellerExists(client, sellerId))) {
+      return json(409, { status: "seller_not_approved", sellerId });
+    }
+    const saved = await client.one<CommerceOrderRow>(
+      `UPDATE commerce_orders
+       SET tenant_id = $2, seller_id = $3, customer_id = $4, source = $5, status = $6, payment_status = $7,
+           fulfillment_status = $8, risk_status = $9, currency = $10, subtotal_amount = $11, tax_amount = $12,
+           shipping_amount = $13, discount_amount = $14, total_amount = $15, customer_email = $16,
+           customer_phone = $17, billing_address = $18::jsonb, shipping_address = $19::jsonb, metadata = $20::jsonb,
+           updated_at = now()
+       WHERE order_id = $1
+       RETURNING *`,
+      [
+        orderId, tenantId, sellerId, asString(input.body.customerId) ?? current.customer_id,
+        asString(input.body.source) ?? current.source, status, paymentStatus, fulfillmentStatus, riskStatus, currency,
+        subtotalAmount, taxAmount, shippingAmount, discountAmount, totalAmount,
+        asString(input.body.customerEmail) ?? current.customer_email, asString(input.body.customerPhone) ?? current.customer_phone,
+        billingAddress, shippingAddress, metadata
+      ]
+    );
+    await writeCommerceOrderEvent(client, input, "order_updated", {}, orderId);
+    return json(200, { status: "ok", order: serializeCommerceOrder(saved!) });
+  });
+}
+
+async function handleCommerceOrderConfirm(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireOrdersMutation(input);
+  if (denied) return denied;
+  return input.db.transaction(async (client) => {
+    const current = await findCommerceOrder(client, orderId);
+    if (!current) return json(404, { status: "order_not_found", orderId });
+    if (current.status === "cancelled" || current.status === "archived") return json(409, { status: "order_transition_blocked", orderId });
+    const saved = await client.one<CommerceOrderRow>(`UPDATE commerce_orders SET status = 'confirmed', updated_at = now() WHERE order_id = $1 RETURNING *`, [orderId]);
+    await writeCommerceOrderEvent(client, input, "order_confirmed", {}, orderId);
+    return json(200, { status: "ok", order: serializeCommerceOrder(saved!) });
+  });
+}
+
+async function handleCommerceOrderCancel(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireOrdersMutation(input);
+  if (denied) return denied;
+  const reason = asString(input.body.reason);
+  if (!reason) return json(422, { status: "order_cancel_reason_required" });
+  return input.db.transaction(async (client) => {
+    if (!(await findCommerceOrder(client, orderId))) return json(404, { status: "order_not_found", orderId });
+    const saved = await client.one<CommerceOrderRow>(
+      `UPDATE commerce_orders
+       SET status = 'cancelled', fulfillment_status = 'cancelled',
+           metadata = metadata || jsonb_build_object('cancelReason', $2::text), updated_at = now()
+       WHERE order_id = $1
+       RETURNING *`,
+      [orderId, reason]
+    );
+    await writeCommerceOrderEvent(client, input, "order_cancelled", { reason }, orderId);
+    return json(200, { status: "ok", order: serializeCommerceOrder(saved!) });
+  });
+}
+
+async function handleCommerceOrderMarkPaid(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireOrdersMutation(input);
+  if (denied) return denied;
+  return input.db.transaction(async (client) => {
+    if (!(await findCommerceOrder(client, orderId))) return json(404, { status: "order_not_found", orderId });
+    const saved = await client.one<CommerceOrderRow>(`UPDATE commerce_orders SET payment_status = 'paid', updated_at = now() WHERE order_id = $1 RETURNING *`, [orderId]);
+    await writeCommerceOrderEvent(client, input, "order_marked_paid", { internalStatusOnly: true, paymentCaptured: false }, orderId);
+    return json(200, { status: "ok", internalStatusOnly: true, paymentCaptured: false, order: serializeCommerceOrder(saved!) });
+  });
+}
+
+async function handleCommerceOrderMarkFulfilled(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireOrdersMutation(input);
+  if (denied) return denied;
+  return input.db.transaction(async (client) => {
+    if (!(await findCommerceOrder(client, orderId))) return json(404, { status: "order_not_found", orderId });
+    const saved = await client.one<CommerceOrderRow>(
+      `UPDATE commerce_orders
+       SET fulfillment_status = 'fulfilled', status = CASE WHEN status IN ('draft', 'placed', 'confirmed') THEN 'processing' ELSE status END,
+           updated_at = now()
+       WHERE order_id = $1
+       RETURNING *`,
+      [orderId]
+    );
+    await writeCommerceOrderEvent(client, input, "order_marked_fulfilled", { shipmentLabelCreated: false }, orderId);
+    return json(200, { status: "ok", shipmentLabelCreated: false, order: serializeCommerceOrder(saved!) });
+  });
+}
+
+async function handleCommerceOrderItemList(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) return denied;
+  if (!(await findCommerceOrder(input.db, orderId))) return json(404, { status: "order_not_found", orderId });
+  return json(200, { status: "ok", items: (await commerceOrderItems(input.db, orderId)).map(serializeCommerceOrderItem) });
+}
+
+async function handleCommerceOrderItemCreate(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireOrdersMutation(input);
+  if (denied) return denied;
+  const title = asString(input.body.title);
+  const productId = asString(input.body.productId) ?? null;
+  const variantId = asString(input.body.variantId) ?? null;
+  const sellerId = asString(input.body.sellerId) ?? null;
+  const quantity = requiredPositiveInteger(input.body.quantity);
+  const unitPriceAmount = optionalAmount(input.body.unitPriceAmount);
+  const taxAmount = optionalAmount(input.body.taxAmount ?? 0);
+  const discountAmount = optionalAmount(input.body.discountAmount ?? 0);
+  const metadata = input.body.metadata ?? {};
+  const totalAmount =
+    quantity === undefined || unitPriceAmount === null || unitPriceAmount === undefined ||
+    taxAmount === null || taxAmount === undefined || discountAmount === null || discountAmount === undefined
+      ? undefined
+      : calculateOrderTotal(quantity * unitPriceAmount, taxAmount, 0, discountAmount);
+  if (!title || totalAmount === undefined || !jsonObject(metadata)) {
+    return json(422, { status: "order_item_invalid", required: ["title", "quantity", "unitPriceAmount"] });
+  }
+  return input.db.transaction(async (client) => {
+    if (!(await findCommerceOrder(client, orderId))) return json(404, { status: "order_not_found", orderId });
+    if (sellerId && !(await approvedSellerExists(client, sellerId))) return json(409, { status: "seller_not_approved", sellerId });
+    if (productId && !(await catalogProductExists(client, productId))) return json(409, { status: "product_not_found", productId });
+    if (variantId && !(await catalogVariantExists(client, productId, variantId))) return json(409, { status: "variant_not_found", variantId });
+    const itemId = newCommerceOrderResourceId("item");
+    const saved = await client.one<CommerceOrderItemRow>(
+      `INSERT INTO commerce_order_items
+        (order_id, item_id, product_id, variant_id, seller_id, title, sku, quantity, unit_price_amount, tax_amount,
+         discount_amount, total_amount, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
+       RETURNING *`,
+      [orderId, itemId, productId, variantId, sellerId, title, asString(input.body.sku) ?? null, quantity, unitPriceAmount, taxAmount, discountAmount, totalAmount, metadata]
+    );
+    await recomputeCommerceOrderTotals(client, orderId);
+    await writeCommerceOrderEvent(client, input, "order_item_created", { itemId, productId, variantId }, orderId);
+    return json(201, { status: "ok", item: serializeCommerceOrderItem(saved!) });
+  });
+}
+
+async function handleCommerceOrderItemUpdate(input: OperationalRouteInput, itemId: string) {
+  const denied = await requireOrdersMutation(input);
+  if (denied) return denied;
+  return input.db.transaction(async (client) => {
+    const current = await client.one<CommerceOrderItemRow>(`SELECT * FROM commerce_order_items WHERE item_id = $1 LIMIT 1`, [itemId]);
+    if (!current) return json(404, { status: "order_item_not_found", itemId });
+    const productId = input.body.productId === undefined ? current.product_id : asString(input.body.productId) ?? null;
+    const variantId = input.body.variantId === undefined ? current.variant_id : asString(input.body.variantId) ?? null;
+    const sellerId = input.body.sellerId === undefined ? current.seller_id : asString(input.body.sellerId) ?? null;
+    const quantity = input.body.quantity === undefined ? current.quantity : requiredPositiveInteger(input.body.quantity);
+    const unitPriceAmount = input.body.unitPriceAmount === undefined ? Number(current.unit_price_amount) : optionalAmount(input.body.unitPriceAmount);
+    const taxAmount = input.body.taxAmount === undefined ? Number(current.tax_amount) : optionalAmount(input.body.taxAmount);
+    const discountAmount = input.body.discountAmount === undefined ? Number(current.discount_amount) : optionalAmount(input.body.discountAmount);
+    const metadata = input.body.metadata ?? current.metadata;
+    const totalAmount =
+      quantity === undefined || unitPriceAmount === null || unitPriceAmount === undefined ||
+      taxAmount === null || taxAmount === undefined || discountAmount === null || discountAmount === undefined
+        ? undefined
+        : calculateOrderTotal(quantity * unitPriceAmount, taxAmount, 0, discountAmount);
+    if (totalAmount === undefined || !jsonObject(metadata)) return json(422, { status: "order_item_invalid" });
+    if (sellerId && !(await approvedSellerExists(client, sellerId))) return json(409, { status: "seller_not_approved", sellerId });
+    if (productId && !(await catalogProductExists(client, productId))) return json(409, { status: "product_not_found", productId });
+    if (variantId && !(await catalogVariantExists(client, productId, variantId))) return json(409, { status: "variant_not_found", variantId });
+    const saved = await client.one<CommerceOrderItemRow>(
+      `UPDATE commerce_order_items
+       SET product_id = $2, variant_id = $3, seller_id = $4, title = $5, sku = $6, quantity = $7,
+           unit_price_amount = $8, tax_amount = $9, discount_amount = $10, total_amount = $11,
+           metadata = $12::jsonb, updated_at = now()
+       WHERE item_id = $1
+       RETURNING *`,
+      [itemId, productId, variantId, sellerId, asString(input.body.title) ?? current.title, asString(input.body.sku) ?? current.sku, quantity, unitPriceAmount, taxAmount, discountAmount, totalAmount, metadata]
+    );
+    await recomputeCommerceOrderTotals(client, current.order_id);
+    await writeCommerceOrderEvent(client, input, "order_item_updated", { itemId, productId, variantId }, current.order_id);
+    return json(200, { status: "ok", item: serializeCommerceOrderItem(saved!) });
+  });
+}
+
+async function handleCommerceOrderEvents(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) return denied;
+  if (!(await findCommerceOrder(input.db, orderId))) return json(404, { status: "order_not_found", orderId });
+  return json(200, {
+    status: "ok",
+    events: await input.db.query<CommerceOrderEventRow>(
+      `SELECT id, order_id, event_type, actor_principal_id, payload, created_at
+       FROM commerce_order_events WHERE order_id = $1 ORDER BY created_at DESC LIMIT 100`,
+      [orderId]
+    )
+  });
+}
+
+async function handleCommerceOrderReturnList(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) return denied;
+  return json(200, { status: "ok", returns: (await commerceOrderReturns(input.db)).map(serializeCommerceOrderReturn), module: await getOrdersModuleState(input.db) });
+}
+
+async function handleCommerceOrderReturnCreate(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireOrdersMutation(input);
+  if (denied) return denied;
+  const reason = asString(input.body.reason);
+  const metadata = input.body.metadata ?? {};
+  if (!reason || !jsonObject(metadata)) return json(422, { status: "order_return_reason_required" });
+  return input.db.transaction(async (client) => {
+    if (!(await findCommerceOrder(client, orderId))) return json(404, { status: "order_not_found", orderId });
+    const returnId = newCommerceOrderResourceId("return");
+    const saved = await client.one<CommerceOrderReturnRow>(
+      `INSERT INTO commerce_order_returns (return_id, order_id, reason, requested_by_principal_id, metadata)
+       VALUES ($1, $2, $3, $4::uuid, $5::jsonb)
+       RETURNING *`,
+      [returnId, orderId, reason, actorPrincipalId(input), metadata]
+    );
+    await writeCommerceOrderEvent(client, input, "order_return_requested", { returnId, reason }, orderId);
+    return json(201, { status: "ok", return: serializeCommerceOrderReturn(saved!) });
+  });
+}
+
+async function handleCommerceOrderReturnReview(input: OperationalRouteInput, returnId: string, decision: "approved" | "rejected") {
+  const denied = await requireOrdersMutation(input);
+  if (denied) return denied;
+  const reason = asString(input.body.reason);
+  if (decision === "rejected" && !reason) return json(422, { status: "order_return_rejection_reason_required" });
+  return input.db.transaction(async (client) => {
+    const current = await client.one<CommerceOrderReturnRow>(`SELECT * FROM commerce_order_returns WHERE return_id = $1 LIMIT 1`, [returnId]);
+    if (!current) return json(404, { status: "order_return_not_found", returnId });
+    const saved = await client.one<CommerceOrderReturnRow>(
+      `UPDATE commerce_order_returns
+       SET status = $2, reason = COALESCE($3, reason), reviewed_by_principal_id = $4::uuid, reviewed_at = now(), updated_at = now()
+       WHERE return_id = $1
+       RETURNING *`,
+      [returnId, decision, reason ?? null, actorPrincipalId(input)]
+    );
+    await writeCommerceOrderEvent(client, input, decision === "approved" ? "order_return_approved" : "order_return_rejected", { returnId, reason: reason ?? null }, current.order_id);
+    return json(200, { status: "ok", return: serializeCommerceOrderReturn(saved!) });
+  });
+}
+
+async function handleCommerceOrderRefundList(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) return denied;
+  return json(200, { status: "ok", refunds: (await commerceOrderRefunds(input.db)).map(serializeCommerceOrderRefund), module: await getOrdersModuleState(input.db) });
+}
+
+async function handleCommerceOrderRefundCreate(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireOrdersMutation(input);
+  if (denied) return denied;
+  const reason = asString(input.body.reason);
+  const amount = optionalAmount(input.body.amount);
+  const currency = asString(input.body.currency)?.toUpperCase();
+  const returnId = asString(input.body.returnId) ?? null;
+  const metadata = input.body.metadata ?? {};
+  if (!reason || amount === null || amount === undefined || amount <= 0 || !currency || !validCurrency(currency) || !jsonObject(metadata)) {
+    return json(422, { status: "order_refund_invalid", required: ["reason", "amount", "currency"] });
+  }
+  return input.db.transaction(async (client) => {
+    const order = await findCommerceOrder(client, orderId);
+    if (!order) return json(404, { status: "order_not_found", orderId });
+    if (returnId) {
+      const orderReturn = await client.one<{ readonly return_id: string }>(`SELECT return_id FROM commerce_order_returns WHERE return_id = $1 AND order_id = $2 LIMIT 1`, [returnId, orderId]);
+      if (!orderReturn) return json(409, { status: "order_return_not_found", returnId });
+    }
+    if (currency !== order.currency) return json(422, { status: "order_refund_currency_mismatch", currency: order.currency });
+    const refundId = newCommerceOrderResourceId("refund");
+    const saved = await client.one<CommerceOrderRefundRow>(
+      `INSERT INTO commerce_order_refunds (refund_id, order_id, return_id, amount, currency, reason, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+       RETURNING *`,
+      [refundId, orderId, returnId, amount, currency, reason, metadata]
+    );
+    await writeCommerceOrderEvent(client, input, "order_refund_requested", { refundId, returnId, amount, currency, paymentTransferred: false }, orderId);
+    return json(201, { status: "ok", paymentTransferred: false, refund: serializeCommerceOrderRefund(saved!) });
+  });
+}
+
+async function handleCommerceOrderRefundReview(input: OperationalRouteInput, refundId: string, decision: "approved" | "rejected") {
+  const denied = await requireOrdersMutation(input);
+  if (denied) return denied;
+  const reason = asString(input.body.reason);
+  if (decision === "rejected" && !reason) return json(422, { status: "order_refund_rejection_reason_required" });
+  return input.db.transaction(async (client) => {
+    const current = await client.one<CommerceOrderRefundRow>(`SELECT * FROM commerce_order_refunds WHERE refund_id = $1 LIMIT 1`, [refundId]);
+    if (!current) return json(404, { status: "order_refund_not_found", refundId });
+    const saved = await client.one<CommerceOrderRefundRow>(
+      `UPDATE commerce_order_refunds
+       SET status = $2, reason = COALESCE($3, reason), updated_at = now()
+       WHERE refund_id = $1
+       RETURNING *`,
+      [refundId, decision, reason ?? null]
+    );
+    if (decision === "approved") {
+      const totals = await client.one<{ readonly approved_amount: number | string; readonly total_amount: number | string }>(
+        `SELECT COALESCE(sum(r.amount) FILTER (WHERE r.status = 'approved'), 0) AS approved_amount, o.total_amount
+         FROM commerce_orders o
+         LEFT JOIN commerce_order_refunds r ON r.order_id = o.order_id
+         WHERE o.order_id = $1
+         GROUP BY o.total_amount`,
+        [current.order_id]
+      );
+      const paymentStatus = Number(totals?.approved_amount ?? 0) >= Number(totals?.total_amount ?? 0) ? "refunded" : "partially_refunded";
+      await client.query(`UPDATE commerce_orders SET payment_status = $2, updated_at = now() WHERE order_id = $1`, [current.order_id, paymentStatus]);
+    }
+    await writeCommerceOrderEvent(client, input, decision === "approved" ? "order_refund_approved" : "order_refund_rejected", { refundId, reason: reason ?? null, paymentTransferred: false }, current.order_id);
+    return json(200, { status: "ok", paymentTransferred: false, refund: serializeCommerceOrderRefund(saved!) });
+  });
+}
+
+async function handleCommerceOrderMedusaSyncJobs(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) return denied;
+  return json(200, { status: "ok", syncJobs: (await commerceOrderSyncJobs(input.db)).map(serializeCommerceOrderSyncJob), medusaHealth: await catalogMedusaHealth(input) });
+}
+
+async function handleCommerceOrderQueueMedusaSync(input: OperationalRouteInput, orderId: string) {
+  const denied = await requireOrdersMutation(input);
+  if (denied) return denied;
+  if (!(await findCommerceOrder(input.db, orderId))) return json(404, { status: "order_not_found", orderId });
+  const medusaHealth = await catalogMedusaHealth(input);
+  if (medusaHealth.status !== "ok") {
+    await writeCommerceOrderEvent(input.db, input, "order_medusa_sync_blocked", { reason: "medusa_unavailable" }, orderId);
+    return json(503, { status: "medusa_unavailable", medusaHealth });
+  }
+  return input.db.transaction(async (client) => {
+    const order = await findCommerceOrder(client, orderId);
+    if (!order) return json(404, { status: "order_not_found", orderId });
+    if (!["confirmed", "processing", "completed"].includes(order.status)) {
+      await writeCommerceOrderEvent(client, input, "order_medusa_sync_blocked", { reason: "order_not_confirmed" }, orderId);
+      return json(409, { status: "order_not_confirmed", orderId });
+    }
+    const items = await commerceOrderItems(client, orderId);
+    const jobId = newCommerceOrderResourceId("orderjob");
+    const snapshot = {
+      order: serializeCommerceOrder(order),
+      items: items.map(serializeCommerceOrderItem),
+      queuedAt: new Date().toISOString()
+    };
+    const job = await client.one<CommerceMedusaOrderSyncJobRow>(
+      `INSERT INTO commerce_medusa_order_sync_jobs (job_id, order_id, job_type, status, payload, result)
+       VALUES ($1, $2, 'order_snapshot_sync', 'queued', $3::jsonb, '{}'::jsonb)
+       RETURNING *`,
+      [jobId, orderId, snapshot]
+    );
+    await writeCommerceOrderEvent(client, input, "order_medusa_sync_queued", { jobId }, orderId);
+    return json(200, { status: "ok", directMedusaWritePerformed: false, directMedusaPullPerformed: false, syncJob: serializeCommerceOrderSyncJob(job!), medusaHealth });
+  });
+}
+
+function parseCommerceOrderPath(pathname: string) {
+  const parts = pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  if (parts[0] !== "v1" || parts[1] !== "orders") return null;
+  if (parts.length === 2) return { resource: "orders", collection: true } as const;
+  if (!parts[2]) return null;
+  if (parts[2] === "items") {
+    return parts[3] && marketplaceResourceIdPattern.test(parts[3])
+      ? { resource: "items", collection: false, id: parts[3], action: parts[4], extra: parts.slice(5) } as const
+      : null;
+  }
+  if (parts[2] === "returns") {
+    return parts[3]
+      ? marketplaceResourceIdPattern.test(parts[3])
+        ? { resource: "returns", collection: false, id: parts[3], action: parts[4], extra: parts.slice(5) } as const
+        : null
+      : { resource: "returns", collection: true } as const;
+  }
+  if (parts[2] === "refunds") {
+    return parts[3]
+      ? marketplaceResourceIdPattern.test(parts[3])
+        ? { resource: "refunds", collection: false, id: parts[3], action: parts[4], extra: parts.slice(5) } as const
+        : null
+      : { resource: "refunds", collection: true } as const;
+  }
+  if (parts[2] === "medusa-sync-jobs" && parts.length === 3) return { resource: "medusa-sync-jobs", collection: true } as const;
+  return marketplaceResourceIdPattern.test(parts[2])
+    ? { resource: "orders", collection: false, id: parts[2], action: parts[3], extra: parts.slice(4) } as const
+    : null;
+}
+
+async function handleCommerceOrderRoute(input: OperationalRouteInput) {
+  try {
+    const parsed = parseCommerceOrderPath(input.pathname);
+    if (!parsed) return json(404, { status: "order_route_not_found", path: input.pathname });
+    if (parsed.resource === "orders") {
+      if (parsed.collection) {
+        if (input.method === "GET") return handleCommerceOrderList(input);
+        if (input.method === "POST") return handleCommerceOrderCreate(input);
+      } else {
+        if (!parsed.action && input.method === "GET") return handleCommerceOrderDetail(input, parsed.id!);
+        if (!parsed.action && input.method === "PATCH") return handleCommerceOrderUpdate(input, parsed.id!);
+        if (parsed.action === "confirm" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderConfirm(input, parsed.id!);
+        if (parsed.action === "cancel" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderCancel(input, parsed.id!);
+        if (parsed.action === "mark-paid" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderMarkPaid(input, parsed.id!);
+        if (parsed.action === "mark-fulfilled" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderMarkFulfilled(input, parsed.id!);
+        if (parsed.action === "items" && input.method === "GET" && parsed.extra.length === 0) return handleCommerceOrderItemList(input, parsed.id!);
+        if (parsed.action === "items" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderItemCreate(input, parsed.id!);
+        if (parsed.action === "events" && input.method === "GET" && parsed.extra.length === 0) return handleCommerceOrderEvents(input, parsed.id!);
+        if (parsed.action === "returns" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderReturnCreate(input, parsed.id!);
+        if (parsed.action === "refunds" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderRefundCreate(input, parsed.id!);
+        if (parsed.action === "queue-medusa-sync" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderQueueMedusaSync(input, parsed.id!);
+      }
+    }
+    if (parsed.resource === "items" && !parsed.collection && !parsed.action && input.method === "PATCH") return handleCommerceOrderItemUpdate(input, parsed.id);
+    if (parsed.resource === "returns") {
+      if (parsed.collection && input.method === "GET") return handleCommerceOrderReturnList(input);
+      if (!parsed.collection && parsed.action === "approve" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderReturnReview(input, parsed.id, "approved");
+      if (!parsed.collection && parsed.action === "reject" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderReturnReview(input, parsed.id, "rejected");
+    }
+    if (parsed.resource === "refunds") {
+      if (parsed.collection && input.method === "GET") return handleCommerceOrderRefundList(input);
+      if (!parsed.collection && parsed.action === "approve" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderRefundReview(input, parsed.id, "approved");
+      if (!parsed.collection && parsed.action === "reject" && input.method === "POST" && parsed.extra.length === 0) return handleCommerceOrderRefundReview(input, parsed.id, "rejected");
+    }
+    if (parsed.resource === "medusa-sync-jobs" && parsed.collection && input.method === "GET") return handleCommerceOrderMedusaSyncJobs(input);
+    return json(404, { status: "order_route_not_found", path: input.pathname });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) return json(503, { status: "runtime_store_unavailable", operation: "commerce.orders" });
+    throw error;
+  }
+}
+
 async function findTheme(db: RuntimeDatabase | RuntimeDatabaseClient, key: string) {
   return db.one<PlatformThemeRow>(
     `SELECT id, key, name, description, industry, category, status, version, is_core, is_premium,
@@ -5708,6 +6631,8 @@ export function isOperationalRuntimeRoute(pathname: string) {
     pathname.startsWith("/v1/integrations/") ||
     pathname.startsWith("/v1/marketplace/") ||
     pathname.startsWith("/v1/catalog/") ||
+    pathname === "/v1/orders" ||
+    pathname.startsWith("/v1/orders/") ||
     pathname === "/v1/themes" ||
     pathname.startsWith("/v1/themes/") ||
     pathname === "/v1/tenants" ||
@@ -5746,6 +6671,10 @@ export async function handleOperationalRoute(input: OperationalRouteInput): Prom
 
   if (input.pathname.startsWith("/v1/catalog/")) {
     return handleCatalogRoute(input);
+  }
+
+  if (input.pathname === "/v1/orders" || input.pathname.startsWith("/v1/orders/")) {
+    return handleCommerceOrderRoute(input);
   }
 
   if (input.pathname === "/v1/themes" || input.pathname.startsWith("/v1/themes/")) {
