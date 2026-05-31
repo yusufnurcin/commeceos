@@ -6547,6 +6547,514 @@ async function handleBridgeRuntime(input: OperationalRouteInput, bridge: "odoo" 
   }
 }
 
+const demoTenantId = "demo-market";
+const demoSellerId = "demo-seller";
+const demoSellerApplicationId = "demo-seller-application";
+const demoCategoryKey = "demo-category";
+const demoProductId = "demo-product";
+const demoVariantId = "demo-variant";
+const demoOrderId = "demo-order";
+
+interface DemoCountsRow {
+  readonly module_registry_total: number;
+  readonly enabled_modules: number;
+  readonly theme_registry_total: number;
+  readonly plugin_registry_total: number;
+  readonly integration_provider_total: number;
+  readonly demo_tenants: number;
+  readonly demo_sellers: number;
+  readonly demo_seller_applications: number;
+  readonly demo_kyc_documents: number;
+  readonly demo_products: number;
+  readonly demo_categories: number;
+  readonly demo_variants: number;
+  readonly demo_orders: number;
+  readonly demo_returns: number;
+  readonly demo_refunds: number;
+  readonly demo_sync_jobs: number;
+  readonly real_tenants: number;
+  readonly real_sellers: number;
+  readonly real_products: number;
+  readonly real_orders: number;
+}
+
+function demoModeDisabled() {
+  return json(409, {
+    status: "demo_mode_disabled",
+    message: "Demo modu kapalı. DEMO_MODE_ENABLED=true ayarı olmadan demo verisi oluşturulamaz veya temizlenemez."
+  });
+}
+
+async function demoStatusPayload(db: RuntimeDatabase | RuntimeDatabaseClient, enabled: boolean) {
+  const [counts, modules, recentAudit, latestRun] = await Promise.all([
+    db.one<DemoCountsRow>(
+      `SELECT
+        (SELECT count(*)::int FROM platform_modules) AS module_registry_total,
+        (SELECT count(*)::int FROM platform_modules WHERE is_enabled) AS enabled_modules,
+        (SELECT count(*)::int FROM platform_themes) AS theme_registry_total,
+        (SELECT count(*)::int FROM platform_plugins) AS plugin_registry_total,
+        (SELECT count(*)::int FROM platform_integration_providers) AS integration_provider_total,
+        (SELECT count(*)::int FROM tenant_registry.tenants WHERE metadata @> '{"demo":true}'::jsonb) AS demo_tenants,
+        (SELECT count(*)::int FROM marketplace_sellers WHERE metadata @> '{"demo":true}'::jsonb) AS demo_sellers,
+        (SELECT count(*)::int FROM marketplace_seller_applications WHERE metadata @> '{"demo":true}'::jsonb) AS demo_seller_applications,
+        (SELECT count(*)::int FROM marketplace_seller_kyc_documents WHERE metadata @> '{"demo":true}'::jsonb) AS demo_kyc_documents,
+        (SELECT count(*)::int FROM catalog_products WHERE metadata @> '{"demo":true}'::jsonb) AS demo_products,
+        (SELECT count(*)::int FROM catalog_categories WHERE metadata @> '{"demo":true}'::jsonb) AS demo_categories,
+        (SELECT count(*)::int FROM catalog_product_variants WHERE metadata @> '{"demo":true}'::jsonb) AS demo_variants,
+        (SELECT count(*)::int FROM commerce_orders WHERE metadata @> '{"demo":true}'::jsonb) AS demo_orders,
+        (SELECT count(*)::int FROM commerce_order_returns WHERE metadata @> '{"demo":true}'::jsonb) AS demo_returns,
+        (SELECT count(*)::int FROM commerce_order_refunds WHERE metadata @> '{"demo":true}'::jsonb) AS demo_refunds,
+        ((SELECT count(*) FROM catalog_medusa_sync_jobs WHERE payload @> '{"demo":true}'::jsonb) +
+         (SELECT count(*) FROM commerce_medusa_order_sync_jobs WHERE payload @> '{"demo":true}'::jsonb))::int AS demo_sync_jobs,
+        (SELECT count(*)::int FROM tenant_registry.tenants WHERE tenant_id <> 'platform' AND NOT (metadata @> '{"demo":true}'::jsonb)) AS real_tenants,
+        (SELECT count(*)::int FROM marketplace_sellers WHERE NOT (metadata @> '{"demo":true}'::jsonb)) AS real_sellers,
+        (SELECT count(*)::int FROM catalog_products WHERE NOT (metadata @> '{"demo":true}'::jsonb)) AS real_products,
+        (SELECT count(*)::int FROM commerce_orders WHERE NOT (metadata @> '{"demo":true}'::jsonb)) AS real_orders`
+    ),
+    db.query<PlatformModuleRow>(
+      `SELECT id, key, name, description, category, status, version, installed_version, is_core, is_enabled,
+              requires_license, license_status, dependencies, capabilities, settings_schema, created_at, updated_at
+       FROM platform_modules
+       WHERE key = ANY($1::text[])
+       ORDER BY key`,
+      [["tenants", "themes", "plugins", "integrations", "marketplace", "seller_kyc", "catalog", "orders", "erp_odoo", "medusa_commerce"]]
+    ),
+    db.query<{ readonly action: string; readonly result: string; readonly occurred_at: Date | string }>(
+      `SELECT action, result, occurred_at
+       FROM operational_audit.audit_events
+       ORDER BY occurred_at DESC
+       LIMIT 8`
+    ),
+    db.one<{ readonly run_id: string; readonly action: string; readonly status: string; readonly finished_at: Date | string | null; readonly summary: unknown; readonly error: string | null }>(
+      `SELECT run_id, action, status, finished_at, summary, error
+       FROM platform_demo_runs
+       ORDER BY created_at DESC
+       LIMIT 1`
+    )
+  ]);
+
+  return {
+    status: "ok",
+    demoModeEnabled: enabled,
+    counts: counts ?? {
+      module_registry_total: 0,
+      enabled_modules: 0,
+      theme_registry_total: 0,
+      plugin_registry_total: 0,
+      integration_provider_total: 0,
+      demo_tenants: 0,
+      demo_sellers: 0,
+      demo_seller_applications: 0,
+      demo_kyc_documents: 0,
+      demo_products: 0,
+      demo_categories: 0,
+      demo_variants: 0,
+      demo_orders: 0,
+      demo_returns: 0,
+      demo_refunds: 0,
+      demo_sync_jobs: 0,
+      real_tenants: 0,
+      real_sellers: 0,
+      real_products: 0,
+      real_orders: 0
+    },
+    modules: modules.map(serializeModule),
+    recentAudit,
+    latestRun
+  };
+}
+
+async function handleDemoStatus(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    return json(200, await demoStatusPayload(input.db, input.env.demoModeEnabled));
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "demo.status" });
+    }
+    throw error;
+  }
+}
+
+async function handleDemoSeed(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  if (!input.env.demoModeEnabled) {
+    return demoModeDisabled();
+  }
+
+  const runId = `demo:seed:${Date.now()}:${randomUUID()}`;
+  const medusaHealth = await catalogMedusaHealth(input);
+  try {
+    const result = await input.db.transaction(async (client) => {
+      const existing = await client.one<{ readonly metadata: unknown }>(
+        `SELECT metadata FROM tenant_registry.tenants WHERE tenant_id = $1 LIMIT 1`,
+        [demoTenantId]
+      );
+      if (existing && (!jsonObject(existing.metadata) || existing.metadata.demo !== true)) {
+        return { conflict: true, idempotent: false };
+      }
+      if (existing) {
+        await client.query(
+          `INSERT INTO platform_demo_runs (run_id, action, status, finished_at, summary, actor_principal_id)
+           VALUES ($1, 'seed', 'completed', now(), $2::jsonb, $3::uuid)`,
+          [runId, { idempotent: true, tenantId: demoTenantId }, actorPrincipalId(input)]
+        );
+        await writeAudit(client, input, "demo.seed.idempotent", "accepted", { demo: true, demoRunId: runId, tenantId: demoTenantId });
+        return { conflict: false, idempotent: true };
+      }
+
+      const requiredModuleKeys = ["marketplace", "seller_kyc", "themes", "catalog", "orders"];
+      const previousModules = await client.query<{ readonly key: string; readonly is_enabled: boolean; readonly status: string }>(
+        `SELECT key, is_enabled, status FROM platform_modules WHERE key = ANY($1::text[]) ORDER BY key`,
+        [requiredModuleKeys]
+      );
+      const moduleStatesBefore = Object.fromEntries(
+        previousModules.map((module) => [module.key, { isEnabled: module.is_enabled, status: module.status }])
+      );
+      await client.query(
+        `UPDATE platform_modules SET is_enabled = true, status = 'active', updated_at = now()
+         WHERE key = ANY($1::text[])`,
+        [requiredModuleKeys]
+      );
+
+      await client.query(`CREATE SCHEMA IF NOT EXISTS tenant_demo_market`);
+      await client.query(
+        `INSERT INTO tenant_registry.tenants
+          (tenant_id, lifecycle_state, isolation_mode, default_locale, default_currency, display_name, country_code, timezone, metadata)
+         VALUES ($1, 'active', 'schema-per-tenant', 'tr-TR', 'TRY', 'Demo Market', 'TR', 'Europe/Istanbul', $2::jsonb)`,
+        [demoTenantId, { demo: true, demoRunId: runId }]
+      );
+      await client.query(
+        `INSERT INTO tenant_isolation.isolation_plans
+          (tenant_id, isolation_mode, data_residency_mode, postgres_schema, redis_key_prefix, minio_bucket_prefix,
+           meilisearch_index_prefix, cache_namespace, queue_namespace, event_namespace, storage_namespace, erp_plan)
+         VALUES ($1, 'schema-per-tenant', 'country-bound', 'tenant_demo_market', 'tenant:demo-market', 'tenant-demo-market',
+                 'tenant_demo_market', 'cache:tenant:demo-market', 'queue:tenant:demo-market', 'event:tenant:demo-market',
+                 'storage/tenant/demo-market', $2::jsonb)`,
+        [demoTenantId, { demo: true, odooDatabase: "odoo_demo_market" }]
+      );
+      await client.query(
+        `INSERT INTO tenant_registry.tenant_branding (tenant_id, brand_name, color_tokens)
+         VALUES ($1, 'Demo Market', $2::jsonb)`,
+        [demoTenantId, { demo: true }]
+      );
+      await client.query(
+        `INSERT INTO tenant_registry.tenant_locale_currency
+          (tenant_id, default_locale, supported_locales, default_currency, supported_currencies, timezone)
+         VALUES ($1, 'tr-TR', ARRAY['tr-TR'], 'TRY', ARRAY['TRY'], 'Europe/Istanbul')`,
+        [demoTenantId]
+      );
+      await client.query(
+        `INSERT INTO tenant_registry.tenant_limits
+          (tenant_id, max_workspaces, max_users, max_storage_gb, max_events_per_minute, max_queue_depth)
+         VALUES ($1, 2, 5, 1, 120, 100)`,
+        [demoTenantId]
+      );
+      for (const workspaceType of ["tenant-portal", "seller-portal"]) {
+        await client.query(
+          `INSERT INTO tenant_registry.tenant_workspaces (tenant_id, workspace_id, workspace_type, enabled, role_ids)
+           VALUES ($1, $2, $3, true, $4)`,
+          [demoTenantId, `${demoTenantId}:${workspaceType}`, workspaceType, [`workspace.${workspaceType}.operator`]]
+        );
+      }
+      await client.query(
+        `INSERT INTO tenant_registry.tenant_erp_bridges
+          (tenant_id, odoo_database, odoo_company_ids, raw_ui_allowed, enabled, provisioning_status)
+         VALUES ($1, 'odoo_demo_market', ARRAY[]::text[], false, true, 'demo_mapping_pending')`,
+        [demoTenantId]
+      );
+      await client.query(
+        `INSERT INTO tenant_registry.tenant_commerce_bridges
+          (tenant_id, medusa_region_scope, admin_ui_allowed, enabled, provisioning_status)
+         VALUES ($1, 'region_demo_market', false, true, 'optional_provider_ready')`,
+        [demoTenantId]
+      );
+      await client.query(
+        `INSERT INTO tenant_registry.tenant_lifecycle_events (tenant_id, from_state, to_state, reason, correlation_id)
+         VALUES ($1, NULL, 'active', 'demo_seed_lifecycle', $2)`,
+        [demoTenantId, runId]
+      );
+      await createOutboxEvent(
+        client,
+        input,
+        "tenant_created",
+        { demo: true, demoRunId: runId, tenantId: demoTenantId, displayName: "Demo Market" },
+        `${runId}:tenant-created`,
+        { tenantId: demoTenantId, workspaceId: "central-admin" }
+      );
+      await writeAudit(client, input, "tenant_created", "accepted", { demo: true, demoRunId: runId, tenantId: demoTenantId });
+
+      const theme = await client.one<{ readonly id: string; readonly key: string }>(
+        `SELECT id, key FROM platform_themes WHERE key IN ('tenant_default', 'enterprise_default')
+         ORDER BY CASE key WHEN 'tenant_default' THEN 0 ELSE 1 END LIMIT 1`
+      );
+      if (!theme) {
+        throw new Error("demo_theme_manifest_missing");
+      }
+      await client.query(
+        `INSERT INTO platform_theme_assignments (tenant_id, theme_id, status, assigned_by_principal_id, activated_at, settings)
+         VALUES ($1, $2::uuid, 'active', $3::uuid, now(), $4::jsonb)`,
+        [demoTenantId, theme.id, actorPrincipalId(input), { demo: true, demoRunId: runId }]
+      );
+      await writeThemeEvent(client, input, "theme_assigned", { demo: true, demoRunId: runId, themeKey: theme.key }, { themeId: theme.id, tenantId: demoTenantId });
+
+      await client.query(
+        `INSERT INTO marketplace_sellers
+          (seller_id, tenant_id, display_name, legal_name, seller_type, status, risk_status, country, currency, tax_number,
+           phone, email, onboarding_stage, approved_at, metadata)
+         VALUES ($1, $2, 'Demo Satıcı A.Ş.', 'Demo Satıcı Anonim Şirketi', 'company', 'approved', 'normal', 'TR', 'TRY',
+                 'DEMO-TAX-001', '+900000000000', 'demo-satici@commerceos.local', 'approved', now(), $3::jsonb)`,
+        [demoSellerId, demoTenantId, { demo: true, demoRunId: runId }]
+      );
+      await client.query(
+        `INSERT INTO marketplace_seller_applications
+          (application_id, tenant_id, seller_id, display_name, legal_name, seller_type, country, email, phone, tax_number,
+           status, review_status, review_notes, reviewed_by_principal_id, reviewed_at, submitted_at, provider_context, metadata)
+         VALUES ($1, $2, $3, 'Demo Satıcı A.Ş.', 'Demo Satıcı Anonim Şirketi', 'company', 'TR', 'demo-satici@commerceos.local',
+                 '+900000000000', 'DEMO-TAX-001', 'approved', 'approved', 'Demo Mode lifecycle onayı', $4::uuid, now(), now(),
+                 $5::jsonb, $5::jsonb)`,
+        [demoSellerApplicationId, demoTenantId, demoSellerId, actorPrincipalId(input), { demo: true, demoRunId: runId, providerReady: false }]
+      );
+      await writeMarketplaceSellerEvent(client, input, "seller_application_created", { demo: true, demoRunId: runId }, { applicationId: demoSellerApplicationId });
+      await writeMarketplaceSellerEvent(client, input, "seller_application_submitted", { demo: true, demoRunId: runId }, { applicationId: demoSellerApplicationId });
+      await writeMarketplaceSellerEvent(client, input, "seller_application_approved", { demo: true, demoRunId: runId }, { sellerId: demoSellerId, applicationId: demoSellerApplicationId });
+      await writeMarketplaceSellerEvent(client, input, "seller_created", { demo: true, demoRunId: runId }, { sellerId: demoSellerId, applicationId: demoSellerApplicationId });
+      const kyc = await client.one<{ readonly id: string }>(
+        `INSERT INTO marketplace_seller_kyc_documents
+          (seller_id, application_id, document_type, document_status, file_name, file_mime_type, file_size_bytes, metadata,
+           reviewed_by_principal_id, reviewed_at)
+         VALUES ($1, $2, 'tax_certificate', 'approved', 'Demo Vergi Levhası Metadata Kaydı', 'application/pdf', 0, $3::jsonb, $4::uuid, now())
+         RETURNING id`,
+        [demoSellerId, demoSellerApplicationId, { demo: true, demoRunId: runId, uploadPerformed: false }, actorPrincipalId(input)]
+      );
+      await writeMarketplaceSellerEvent(client, input, "seller_kyc_document_added", { demo: true, demoRunId: runId, documentId: kyc?.id }, { sellerId: demoSellerId, applicationId: demoSellerApplicationId });
+      await writeMarketplaceSellerEvent(client, input, "seller_kyc_document_approved", { demo: true, demoRunId: runId, documentId: kyc?.id }, { sellerId: demoSellerId, applicationId: demoSellerApplicationId });
+
+      await client.query(
+        `INSERT INTO catalog_categories (category_key, name, description, status, sort_order, seo, metadata)
+         VALUES ($1, 'Demo Kategori', 'Demo Mode katalog kategorisi', 'active', 0, $2::jsonb, $2::jsonb)`,
+        [demoCategoryKey, { demo: true, demoRunId: runId }]
+      );
+      await writeCatalogProductEvent(client, input, "catalog_category_created", { demo: true, demoRunId: runId, categoryKey: demoCategoryKey });
+      await client.query(
+        `INSERT INTO catalog_products
+          (product_id, tenant_id, seller_id, title, description, product_type, status, moderation_status, sync_status,
+           country, currency, base_price_amount, sku, slug, category_key, attributes, seo, metadata, created_by_principal_id,
+           approved_by_principal_id, approved_at)
+         VALUES ($1, $2, $3, 'Demo Ürün', 'Demo Mode ürün kaydı', 'physical', 'active', 'approved', $4, 'TR', 'TRY',
+                 129.90, 'DEMO-SKU-001', 'demo-urun', $5, $6::jsonb, $6::jsonb, $6::jsonb, $7::uuid, $7::uuid, now())`,
+        [demoProductId, demoTenantId, demoSellerId, medusaHealth.status === "ok" ? "queued" : "not_synced", demoCategoryKey, { demo: true, demoRunId: runId }, actorPrincipalId(input)]
+      );
+      await writeCatalogProductEvent(client, input, "catalog_product_created", { demo: true, demoRunId: runId, title: "Demo Ürün" }, demoProductId);
+      await writeCatalogProductEvent(client, input, "catalog_product_submitted", { demo: true, demoRunId: runId }, demoProductId);
+      await writeCatalogProductEvent(client, input, "catalog_product_approved", { demo: true, demoRunId: runId }, demoProductId);
+      await client.query(
+        `INSERT INTO catalog_product_variants
+          (product_id, variant_id, title, sku, price_amount, currency, stock_quantity, attributes, metadata)
+         VALUES ($1, $2, 'Demo Ürün Standart', 'DEMO-SKU-001', 129.90, 'TRY', 25, $3::jsonb, $3::jsonb)`,
+        [demoProductId, demoVariantId, { demo: true, demoRunId: runId }]
+      );
+      await writeCatalogProductEvent(client, input, "catalog_variant_created", { demo: true, demoRunId: runId, variantId: demoVariantId }, demoProductId);
+      if (medusaHealth.status === "ok") {
+        await client.query(
+          `INSERT INTO catalog_medusa_sync_jobs (job_id, product_id, job_type, status, payload, result)
+           VALUES ($1, $2, 'product_snapshot_push', 'queued', $3::jsonb, '{}'::jsonb)`,
+          [`demojob-catalog-${runId}`, demoProductId, { demo: true, demoRunId: runId, productId: demoProductId, directWritePerformed: false }]
+        );
+        await writeCatalogProductEvent(client, input, "catalog_medusa_sync_queued", { demo: true, demoRunId: runId }, demoProductId);
+      }
+
+      await client.query(
+        `INSERT INTO commerce_orders
+          (order_id, tenant_id, seller_id, customer_id, source, status, payment_status, fulfillment_status, risk_status,
+           currency, subtotal_amount, tax_amount, shipping_amount, discount_amount, total_amount, customer_email, metadata,
+           created_by_principal_id)
+         VALUES ($1, $2, $3, 'demo-customer', 'demo_mode', 'confirmed', 'paid', 'fulfilled', 'normal', 'TRY',
+                 129.90, 0, 0, 0, 129.90, 'demo-musteri@commerceos.local', $4::jsonb, $5::uuid)`,
+        [demoOrderId, demoTenantId, demoSellerId, { demo: true, demoRunId: runId, paymentCaptured: false, shipmentLabelCreated: false }, actorPrincipalId(input)]
+      );
+      await writeCommerceOrderEvent(client, input, "order_created", { demo: true, demoRunId: runId }, demoOrderId);
+      await writeCommerceOrderEvent(client, input, "order_confirmed", { demo: true, demoRunId: runId }, demoOrderId);
+      await writeCommerceOrderEvent(client, input, "order_marked_paid", { demo: true, demoRunId: runId, paymentCaptured: false }, demoOrderId);
+      await writeCommerceOrderEvent(client, input, "order_marked_fulfilled", { demo: true, demoRunId: runId, shipmentLabelCreated: false }, demoOrderId);
+      await client.query(
+        `INSERT INTO commerce_order_items
+          (order_id, item_id, product_id, variant_id, seller_id, title, sku, quantity, unit_price_amount, tax_amount,
+           discount_amount, total_amount, metadata)
+         VALUES ($1, 'demo-order-item', $2, $3, $4, 'Demo Ürün', 'DEMO-SKU-001', 1, 129.90, 0, 0, 129.90, $5::jsonb)`,
+        [demoOrderId, demoProductId, demoVariantId, demoSellerId, { demo: true, demoRunId: runId }]
+      );
+      await writeCommerceOrderEvent(client, input, "order_item_created", { demo: true, demoRunId: runId, itemId: "demo-order-item" }, demoOrderId);
+      await client.query(
+        `INSERT INTO commerce_order_returns
+          (return_id, order_id, status, reason, requested_by_principal_id, reviewed_by_principal_id, reviewed_at, metadata)
+         VALUES ('demo-return', $1, 'approved', 'Demo Mode iade örneği', $2::uuid, $2::uuid, now(), $3::jsonb)`,
+        [demoOrderId, actorPrincipalId(input), { demo: true, demoRunId: runId }]
+      );
+      await writeCommerceOrderEvent(client, input, "order_return_requested", { demo: true, demoRunId: runId, returnId: "demo-return" }, demoOrderId);
+      await writeCommerceOrderEvent(client, input, "order_return_approved", { demo: true, demoRunId: runId, returnId: "demo-return" }, demoOrderId);
+      await client.query(
+        `INSERT INTO commerce_order_refunds (refund_id, order_id, return_id, status, amount, currency, reason, metadata)
+         VALUES ('demo-refund', $1, 'demo-return', 'approved', 129.90, 'TRY', 'Demo Mode refund örneği; transfer yapılmadı', $2::jsonb)`,
+        [demoOrderId, { demo: true, demoRunId: runId, transferPerformed: false }]
+      );
+      await writeCommerceOrderEvent(client, input, "order_refund_requested", { demo: true, demoRunId: runId, refundId: "demo-refund", transferPerformed: false }, demoOrderId);
+      await writeCommerceOrderEvent(client, input, "order_refund_approved", { demo: true, demoRunId: runId, refundId: "demo-refund", transferPerformed: false }, demoOrderId);
+      if (medusaHealth.status === "ok") {
+        await client.query(
+          `INSERT INTO commerce_medusa_order_sync_jobs (job_id, order_id, job_type, status, payload, result)
+           VALUES ($1, $2, 'order_snapshot_push', 'queued', $3::jsonb, '{}'::jsonb)`,
+          [`demojob-order-${runId}`, demoOrderId, { demo: true, demoRunId: runId, orderId: demoOrderId, directWritePerformed: false, directPullPerformed: false }]
+        );
+        await writeCommerceOrderEvent(client, input, "order_medusa_sync_queued", { demo: true, demoRunId: runId }, demoOrderId);
+      }
+
+      const summary = { idempotent: false, demo: true, demoRunId: runId, tenantId: demoTenantId, moduleStatesBefore, medusaSyncQueued: medusaHealth.status === "ok" };
+      await client.query(
+        `INSERT INTO platform_demo_runs (run_id, action, status, finished_at, summary, actor_principal_id)
+         VALUES ($1, 'seed', 'completed', now(), $2::jsonb, $3::uuid)`,
+        [runId, summary, actorPrincipalId(input)]
+      );
+      await writeAudit(client, input, "demo.seed", "accepted", summary);
+      return { conflict: false, idempotent: false };
+    });
+
+    if (result.conflict) {
+      return json(409, { status: "demo_tenant_reserved_conflict", tenantId: demoTenantId });
+    }
+    return json(200, { ...(await demoStatusPayload(input.db, true)), seed: { runId, idempotent: result.idempotent, medusaSyncQueued: medusaHealth.status === "ok" } });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "demo.seed" });
+    }
+    throw error;
+  }
+}
+
+async function handleDemoCleanup(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+  if (!input.env.demoModeEnabled) {
+    return demoModeDisabled();
+  }
+
+  const runId = `demo:cleanup:${Date.now()}:${randomUUID()}`;
+  try {
+    await input.db.transaction(async (client) => {
+      const latestSeed = await client.one<{ readonly summary: unknown }>(
+        `SELECT summary
+         FROM platform_demo_runs
+         WHERE action = 'seed' AND status = 'completed' AND summary ? 'moduleStatesBefore'
+         ORDER BY created_at DESC
+         LIMIT 1`
+      );
+      const summary = jsonObject(latestSeed?.summary) ? latestSeed.summary : {};
+      const moduleStates = jsonObject(summary.moduleStatesBefore) ? summary.moduleStatesBefore : {};
+
+      await client.query(`DELETE FROM commerce_medusa_order_sync_jobs WHERE payload @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM commerce_order_refunds WHERE metadata @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM commerce_order_returns WHERE metadata @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM commerce_order_items WHERE metadata @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM commerce_order_events WHERE payload @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM commerce_orders WHERE metadata @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM catalog_medusa_sync_jobs WHERE payload @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM catalog_product_variants WHERE metadata @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM catalog_product_events WHERE payload @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM catalog_products WHERE metadata @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM catalog_categories WHERE metadata @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM marketplace_seller_kyc_documents WHERE metadata @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM marketplace_seller_events WHERE payload @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM marketplace_seller_applications WHERE metadata @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM marketplace_sellers WHERE metadata @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM platform_theme_events WHERE tenant_id = $1 OR payload @> '{"demo":true}'::jsonb`, [demoTenantId]);
+      await client.query(`DELETE FROM platform_theme_assignments WHERE tenant_id = $1 AND settings @> '{"demo":true}'::jsonb`, [demoTenantId]);
+      await client.query(`DELETE FROM event_core.event_outbox WHERE payload @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM operational_audit.audit_events WHERE payload @> '{"demo":true}'::jsonb`);
+      await client.query(`DELETE FROM tenant_registry.tenants WHERE tenant_id = $1 AND metadata @> '{"demo":true}'::jsonb`, [demoTenantId]);
+      await client.query(`DELETE FROM tenant_isolation.isolation_plans WHERE tenant_id = $1 AND erp_plan @> '{"demo":true}'::jsonb`, [demoTenantId]);
+      await client.query(`DROP SCHEMA IF EXISTS tenant_demo_market CASCADE`);
+
+      for (const [key, state] of Object.entries(moduleStates)) {
+        if (!jsonObject(state) || typeof state.isEnabled !== "boolean" || typeof state.status !== "string") {
+          continue;
+        }
+        await client.query(
+          `UPDATE platform_modules SET is_enabled = $2, status = $3, updated_at = now() WHERE key = $1`,
+          [key, state.isEnabled, state.status]
+        );
+      }
+
+      const cleanupSummary = { demo: true, demoRunId: runId, tenantId: demoTenantId, restoredModuleKeys: Object.keys(moduleStates) };
+      await client.query(
+        `INSERT INTO platform_demo_runs (run_id, action, status, finished_at, summary, actor_principal_id)
+         VALUES ($1, 'cleanup', 'completed', now(), $2::jsonb, $3::uuid)`,
+        [runId, cleanupSummary, actorPrincipalId(input)]
+      );
+      await writeAudit(client, input, "demo.cleanup", "accepted", cleanupSummary);
+    });
+    return json(200, { ...(await demoStatusPayload(input.db, true)), cleanup: { runId } });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "demo.cleanup" });
+    }
+    throw error;
+  }
+}
+
+async function handleOdooEngineStatus(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  const service = input.registry.find((entry) => entry.name === "odoo");
+  const [health, moduleState, providers, bridgeJobs] = await Promise.all([
+    service ? checkService(service) : Promise.resolve({ service: "odoo", status: "failed" as const, error: "service_registry_entry_missing" }),
+    findModule(input.db, "erp_odoo"),
+    input.db.query<{ readonly key: string; readonly status: string; readonly is_enabled: boolean }>(
+      `SELECT key, status, is_enabled FROM platform_integration_providers WHERE key = 'odoo_accounting'`
+    ),
+    input.db.query<{ readonly operation: string; readonly status: string; readonly count: number }>(
+      `SELECT operation, status, count(*)::int AS count FROM bridge_core.odoo_sync_jobs GROUP BY operation, status ORDER BY operation, status`
+    )
+  ]);
+
+  return json(200, {
+    status: "ok",
+    engine: "odoo",
+    positioning: "erp_engine",
+    health,
+    module: moduleState ? serializeModule(moduleState) : null,
+    connection: {
+      internalUrl: `http://${input.env.odooHost}:${input.env.odooPort}`,
+      database: "commerce_os_odoo",
+      authentication: "adapter_not_configured",
+      rawUiExposed: false
+    },
+    installedModules: {
+      status: "verification_adapter_required",
+      message: "Gateway henüz Odoo model registry doğrulama adaptörüne bağlı değil. Aşağıdaki liste bootstrap sırasında talep edilen modüllerdir; kurulu oldukları iddia edilmez.",
+      requestedAtBootstrap: ["account", "account_accountant", "sale_management", "purchase", "stock", "crm", "hr", "mrp", "point_of_sale", "website_sale", "l10n_tr"]
+    },
+    integrationVaultProviders: providers,
+    bridgeJobs,
+    readiness: {
+      ready: ["container", "tcp_health", "database_target", "raw_ui_isolation"],
+      partial: ["bridge_contract", "integration_vault_provider"],
+      missing: ["odoo_auth_adapter", "installed_module_verification", "accounting_mapping", "invoice_sync", "tax_rules", "stock_sync", "purchase_sync", "conflict_resolver", "worker", "erp_preview_ui"]
+    }
+  });
+}
+
 async function handleAiOperations(input: OperationalRouteInput) {
   const reasons = requireProtected(input);
   if (reasons.length > 0) {
@@ -6633,6 +7141,10 @@ export function isOperationalRuntimeRoute(pathname: string) {
     pathname.startsWith("/v1/catalog/") ||
     pathname === "/v1/orders" ||
     pathname.startsWith("/v1/orders/") ||
+    pathname === "/v1/demo/status" ||
+    pathname === "/v1/demo/seed" ||
+    pathname === "/v1/demo/cleanup" ||
+    pathname === "/v1/engines/odoo" ||
     pathname === "/v1/themes" ||
     pathname.startsWith("/v1/themes/") ||
     pathname === "/v1/tenants" ||
@@ -6713,6 +7225,10 @@ export async function handleOperationalRoute(input: OperationalRouteInput): Prom
         return handleBridgeRuntime(input, "medusa");
       case "/v1/runtime/verification":
         return handleRuntimeVerification(input);
+      case "/v1/demo/status":
+        return handleDemoStatus(input);
+      case "/v1/engines/odoo":
+        return handleOdooEngineStatus(input);
       default:
         if (input.pathname.startsWith("/v1/tenants/")) {
           const tenantId = decodeURIComponent(input.pathname.slice("/v1/tenants/".length));
@@ -6742,6 +7258,10 @@ export async function handleOperationalRoute(input: OperationalRouteInput): Prom
         return handleBridgeJob(input, "odoo");
       case "/v1/bridges/medusa/orchestrate":
         return handleBridgeJob(input, "medusa");
+      case "/v1/demo/seed":
+        return handleDemoSeed(input);
+      case "/v1/demo/cleanup":
+        return handleDemoCleanup(input);
       case "/v1/auth/mfa/challenge":
       case "/v1/auth/mfa/verify":
       case "/v1/auth/email-verification/request":

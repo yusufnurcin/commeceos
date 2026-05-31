@@ -77,7 +77,7 @@ export function catalogReadableError(payload: Record<string, unknown>, fallback:
     case "seller_not_approved":
       return "Seçilen satıcı onaylı değil. Ürün yalnızca onaylı bir satıcıya bağlanabilir.";
     case "medusa_unavailable":
-      return "Medusa servisine ulaşılamıyor. Ürün kaydı korundu; senkronizasyon kuyruğa alınmadı.";
+      return "Medusa Bridge Provider erişilemiyor. Commerce OS ürün kaydı korundu; opsiyonel senkronizasyon kuyruğa alınmadı.";
     case "runtime_store_unavailable":
       return "Katalog kayıt servisine şu anda ulaşılamıyor.";
     default:
@@ -229,8 +229,8 @@ export function CatalogProductsPanel({
         </section>
       ) : null}
       <section className="catalog-health-strip">
-        <div><strong>Medusa katalog köprüsü</strong><span>{medusaHealth?.status === "ok" ? "Medusa hazır, sync job kuyruğa alınabilir." : "Medusa erişilemiyor; ürün kayıtları korunur, sync kuyruğu kontrollü olarak durur."}</span></div>
-        <mark data-state={medusaHealth?.status ?? "unknown"}>{medusaHealth?.status === "ok" ? "Hazır" : "Kısıtlı mod"}</mark>
+        <div><strong>Medusa Bridge Provider · opsiyonel katalog sync</strong><span>Commerce OS ürün çekirdeği bağımsızdır. {medusaHealth?.status === "ok" ? "Provider hazır; sync job kuyruğa alınabilir." : "Provider erişilemiyor; ürün kayıtları korunur."}</span></div>
+        <mark data-state={medusaHealth?.status ?? "unknown"}>{medusaHealth?.status === "ok" ? "Provider hazır" : "Kısıtlı mod"}</mark>
       </section>
       {message ? <p className="form-success">{message}</p> : null}
       {error ? <p className="form-error">{error}</p> : null}

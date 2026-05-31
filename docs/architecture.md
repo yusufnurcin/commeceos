@@ -17,7 +17,7 @@ Commerce OS v2 is a multi-tenant commerce operating system foundation, not a con
    - Future policy, rate limit, audit, and AI routing boundary
 
 3. Domain services in `services/*`
-   - `medusa`: headless commerce engine
+   - `medusa`: optional commerce provider / bridge engine
    - `odoo`: backend ERP engine
    - `realtime`: future event delivery foundation
    - `search`: future search orchestration foundation

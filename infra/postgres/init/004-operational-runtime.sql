@@ -12,7 +12,8 @@ ALTER TABLE auth_core.principals
 ALTER TABLE tenant_registry.tenants
   ADD COLUMN IF NOT EXISTS display_name text,
   ADD COLUMN IF NOT EXISTS country_code text,
-  ADD COLUMN IF NOT EXISTS timezone text;
+  ADD COLUMN IF NOT EXISTS timezone text,
+  ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 ALTER TABLE tenant_registry.tenant_erp_bridges
   ADD COLUMN IF NOT EXISTS provisioning_status text NOT NULL DEFAULT 'placeholder_pending';
@@ -618,6 +619,36 @@ CREATE TABLE IF NOT EXISTS platform_themes (
   CONSTRAINT platform_themes_status_check CHECK (status IN ('available', 'active', 'disabled', 'deprecated'))
 );
 
+ALTER TABLE marketplace_sellers
+  ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE marketplace_seller_applications
+  ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE catalog_products
+  ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE catalog_product_variants
+  ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE catalog_categories
+  ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE TABLE IF NOT EXISTS platform_demo_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id text NOT NULL UNIQUE,
+  action text NOT NULL,
+  status text NOT NULL,
+  started_at timestamptz NOT NULL DEFAULT now(),
+  finished_at timestamptz,
+  summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+  error text,
+  actor_principal_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT platform_demo_runs_action_check CHECK (action IN ('seed', 'cleanup')),
+  CONSTRAINT platform_demo_runs_status_check CHECK (status IN ('running', 'completed', 'failed'))
+);
+
 CREATE TABLE IF NOT EXISTS platform_theme_assignments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id text NOT NULL REFERENCES tenant_registry.tenants(tenant_id) ON DELETE CASCADE,
@@ -710,5 +741,6 @@ CREATE INDEX IF NOT EXISTS platform_themes_industry_category_idx ON platform_the
 CREATE INDEX IF NOT EXISTS platform_theme_assignments_theme_idx ON platform_theme_assignments (theme_id, status);
 CREATE INDEX IF NOT EXISTS platform_theme_events_tenant_idx ON platform_theme_events (tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS platform_theme_events_theme_idx ON platform_theme_events (theme_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS platform_demo_runs_action_status_idx ON platform_demo_runs (action, status, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_erp_bridge_engine_idx ON tenant_registry.tenant_erp_bridges (tenant_id, engine);
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_commerce_bridge_engine_idx ON tenant_registry.tenant_commerce_bridges (tenant_id, engine);

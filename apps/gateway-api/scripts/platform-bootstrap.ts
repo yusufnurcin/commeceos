@@ -46,7 +46,7 @@ const coreModules = [
     description: "Ürün, kategori, varyant ve attribute yönetimi.",
     category: "commerce",
     enabled: false,
-    dependencies: ["medusa_commerce"],
+    dependencies: ["tenants"],
     capabilities: ["catalog.products", "catalog.categories", "catalog.import"]
   },
   {
@@ -55,7 +55,7 @@ const coreModules = [
     description: "Sipariş, iade, iptal ve fraud operasyonları.",
     category: "commerce",
     enabled: false,
-    dependencies: ["medusa_commerce"],
+    dependencies: ["tenants"],
     capabilities: ["orders.global", "returns", "refunds"]
   },
   {
@@ -115,7 +115,7 @@ const coreModules = [
   {
     key: "medusa_commerce",
     name: "Medusa Commerce",
-    description: "Medusa health, orchestration jobs ve commerce engine bağlantısı.",
+    description: "Opsiyonel Medusa Bridge Provider health ve orchestration işleri.",
     category: "commerce",
     enabled: true,
     dependencies: ["tenants"],

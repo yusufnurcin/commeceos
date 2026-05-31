@@ -82,11 +82,11 @@ export function createServiceRegistry(input: ServiceRegistryInput): readonly Ser
     },
     {
       name: "medusa",
-      layer: "headless-commerce-engine",
+      layer: "optional-commerce-provider-bridge",
       discoveryName: "medusa",
       probeType: "http",
       healthUrl: `${input.medusaUrl}/health`,
-      criticality: "critical",
+      criticality: "supporting",
       exposedToPlatformUsers: false
     },
     {

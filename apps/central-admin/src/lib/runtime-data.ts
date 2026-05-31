@@ -1,5 +1,6 @@
 import type { NavigationItem } from "@/config/navigation";
 import { gatewayFetchWithRefresh, getGatewayUrl } from "@/lib/gateway-session";
+import type { DemoStatusView } from "@/components/demo-center-panel";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -49,6 +50,7 @@ export interface DashboardRuntimePayload {
       readonly workspace_id?: string;
     }[];
   };
+  readonly demo?: DemoStatusView;
 }
 
 export async function readJson(response: Response): Promise<JsonRecord> {
@@ -69,14 +71,15 @@ export async function getDashboardRuntime(): Promise<DashboardRuntimePayload> {
     return { status: "auth_required" };
   }
 
-  const [me, healthMatrix, operations, tenants, queue, audit, medusaHealth] = await Promise.all([
+  const [me, healthMatrix, operations, tenants, queue, audit, medusaHealth, demo] = await Promise.all([
     meResponse.json().catch(() => ({ status: "me_unavailable" })) as Promise<CurrentSessionPayload>,
     fetch(`${getGatewayUrl()}/runtime/health-matrix`, { cache: "no-store" }).then(readJson),
     gatewayFetchWithRefresh("/v1/control-center/operations", {}, { allowCookieMutation: false }).then(readJson),
     gatewayFetchWithRefresh("/v1/tenants", {}, { allowCookieMutation: false }).then(readJson),
     gatewayFetchWithRefresh("/v1/queues/runtime", {}, { allowCookieMutation: false }).then(readJson),
     gatewayFetchWithRefresh("/v1/audit/runtime", {}, { allowCookieMutation: false }).then(readJson),
-    fetch(`${process.env.MEDUSA_PUBLIC_URL ?? "http://localhost:9000"}/health`, { cache: "no-store" }).then(readJson)
+    fetch(`${process.env.MEDUSA_PUBLIC_URL ?? "http://localhost:9000"}/health`, { cache: "no-store" }).then(readJson),
+    gatewayFetchWithRefresh("/v1/demo/status", {}, { allowCookieMutation: false }).then(readJson)
   ]);
 
   return {
@@ -87,7 +90,8 @@ export async function getDashboardRuntime(): Promise<DashboardRuntimePayload> {
     tenants,
     queue,
     audit,
-    medusaHealth
+    medusaHealth,
+    demo: demo as unknown as DemoStatusView
   } as DashboardRuntimePayload;
 }
 

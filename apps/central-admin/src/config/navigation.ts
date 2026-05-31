@@ -470,7 +470,7 @@ const workspaceSeeds: readonly WorkspaceSeed[] = [
   {
     id: "commerce",
     label: "Medusa Commerce Merkezi",
-    description: "Medusa headless commerce engine health ve domain bridge yönetimi.",
+    description: "Opsiyonel Medusa Bridge Provider health ve domain sync kuyruğu yönetimi.",
     href: "/commerce",
     icon: "shopping-bag",
     group: "Engine",

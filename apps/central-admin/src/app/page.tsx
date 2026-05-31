@@ -1,102 +1,93 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import {
-  AdminShell,
-  DataToolbar,
-  EmptyOperationalState,
-  ManagementAreaGrid,
-  PageHeader,
-  QuickActionGrid,
-  ServiceStatusCard
-} from "@/components/admin";
-import { findNavigationItemByHref, navigationManifest } from "@/config/navigation";
-import { managementAreas, quickActions } from "@/config/management";
+import { AdminShell, DataToolbar, QuickActionGrid, ServiceStatusCard } from "@/components/admin";
+import { navigationManifest } from "@/config/navigation";
+import { quickActions } from "@/config/management";
 import { getDashboardRuntime } from "@/lib/runtime-data";
 
-function serviceTone(status?: string) {
-  return status === "ok" ? "ready" : "waiting";
-}
-
-function readableService(
-  entries: readonly { readonly service?: string; readonly status?: string; readonly latencyMs?: number }[],
-  service: string,
-  label: string
-) {
-  const entry = entries.find((item) => item.service === service);
+function service(entries: readonly { readonly service?: string; readonly status?: string; readonly latencyMs?: number }[], key: string, label: string, detail: string) {
+  const entry = entries.find((candidate) => candidate.service === key);
   return {
     label,
-    status: entry?.status === "ok" ? "Hazır" : "Bekleniyor",
-    detail: entry ? `${service} yanıt veriyor${typeof entry.latencyMs === "number" ? ` · ${entry.latencyMs} ms` : ""}` : "Servis sinyali bekleniyor.",
-    tone: serviceTone(entry?.status)
+    status: entry?.status === "ok" ? "Hazır" : "Kısıtlı mod",
+    detail: entry?.status === "ok" ? `${detail}${typeof entry.latencyMs === "number" ? ` · ${entry.latencyMs} ms` : ""}` : `${detail} Şu anda yanıt alınamıyor.`,
+    tone: entry?.status === "ok" ? "ready" : "attention"
   } as const;
 }
 
 export default async function CentralAdminDashboardPage() {
   const payload = await getDashboardRuntime();
-  if (payload.status === "auth_required" || !payload.me?.principal) {
-    redirect("/login");
-  }
-
-  const principal = payload.me.principal;
-  const dashboardItem = findNavigationItemByHref("/platform/health") ?? navigationManifest[0]!;
-  const tenants = payload.tenants?.tenants ?? [];
+  if (payload.status === "auth_required" || !payload.me?.principal) redirect("/login");
+  const counts = payload.demo?.counts;
   const entries = payload.healthMatrix?.entries ?? [];
-  const queueReady = Boolean(payload.queue);
-  const auditReady = Boolean(payload.audit);
+  const modules = new Map((payload.demo?.modules ?? []).map((module) => [module.key, module]));
+  const coreCards = [
+    { title: "Tenant Registry", description: "Tenant provisioning, workspace ve izolasyon kayıtları.", href: "/tenants", module: "tenants", real: counts?.real_tenants ?? 0, demo: counts?.demo_tenants ?? 0 },
+    { title: "Module Registry", description: "Platform modüllerinin gerçek açma, kapama ve olay geçmişi.", href: "/modules", module: "modules", real: counts?.module_registry_total ?? 0, demo: 0 },
+    { title: "Theme Registry", description: "Sektör temaları ve tenant tema atamaları.", href: "/design/themes", module: "themes", real: counts?.theme_registry_total ?? 0, demo: counts?.demo_tenants ?? 0 },
+    { title: "Plugin Registry", description: "Plugin katalog kayıtları, aktivasyon ve ayarlar.", href: "/modules/plugins", module: "plugins", real: counts?.plugin_registry_total ?? 0, demo: 0 },
+    { title: "Integration Vault", description: "Sağlayıcı kataloğu, şifreli credential ve dayanıklılık politikaları.", href: "/settings/integrations", module: "integrations", real: counts?.integration_provider_total ?? 0, demo: 0 },
+    { title: "Seller / KYC", description: "Satıcı başvurusu, onay ve belge metadata lifecycle.", href: "/marketplace/sellers", module: "marketplace", real: counts?.real_sellers ?? 0, demo: counts?.demo_sellers ?? 0 },
+    { title: "Catalog / Product", description: "Ürün, kategori, varyant ve moderasyon çekirdeği.", href: "/catalog/products", module: "catalog", real: counts?.real_products ?? 0, demo: counts?.demo_products ?? 0 },
+    { title: "Order Core", description: "Sipariş, kalem, iade, refund ve iç operasyon durumları.", href: "/orders", module: "orders", real: counts?.real_orders ?? 0, demo: counts?.demo_orders ?? 0 }
+  ] as const;
 
   return (
-    <AdminShell navigation={navigationManifest} principal={principal}>
-      <PageHeader
-        item={{
-          ...dashboardItem,
-          label: "Ana Yönetim Dashboard",
-          description:
-            "Commerce OS Central Admin artık günlük yönetim işleri için ana kontrol paneli; tenant, satıcı, ürün, sipariş, finans, ERP ve modül yönetimi tek yerden başlar."
-        }}
-        principal={principal}
-        actions={
-          <Link className="primary-link" href="/tenants/new">
-            Yeni Tenant Oluştur
-          </Link>
-        }
-      />
+    <AdminShell navigation={navigationManifest} principal={payload.me.principal}>
+      <header className="product-dashboard-hero">
+        <div>
+          <span>Commerce OS Core</span>
+          <h1>Central Admin</h1>
+          <p>Çalışan çekirdekleri, gerçek kayıtları ve açıkça etiketlenmiş demo verisini tek merkezden yönetin.</p>
+        </div>
+        <div className="catalog-action-row">
+          <Link className="primary-link" href="/tenants/new">Yeni tenant oluştur</Link>
+          <Link className="secondary-link" href="/settings/demo">Demo Merkezi</Link>
+        </div>
+      </header>
 
       <section className="dashboard-section">
-        <DataToolbar title="Hızlı İşlemler" description="En sık yapılan yönetim işlerine doğrudan gidin." />
-        <QuickActionGrid actions={quickActions} />
+        <DataToolbar title="Hızlı işlemler" description="Doğrudan gerçek yönetim akışlarına gidin." />
+        <QuickActionGrid actions={[...quickActions, { label: "Demo Merkezi", href: "/settings/demo", description: "Açıkça etiketlenmiş demo lifecycle kayıtlarını yönet" }]} />
       </section>
 
       <section className="dashboard-section">
-        <DataToolbar title="Yönetim Alanları" description="Central Admin'in ana iş akışları. Alt işlemler ilgili sayfaların içinde kart olarak açılır." />
-        <ManagementAreaGrid areas={managementAreas} />
+        <DataToolbar title="Çalışan çekirdekler" description="Sayaçlar PostgreSQL kayıtlarından gelir. Demo kayıtlar üretim verisinden ayrı gösterilir." />
+        <div className="product-core-grid">
+          {coreCards.map((card) => {
+            const registryModule = modules.get(card.module);
+            return (
+              <article className="product-core-card" key={card.title}>
+                <header><h2>{card.title}</h2><mark data-state={registryModule?.isEnabled === false ? "waiting" : "ok"}>{registryModule?.isEnabled === false ? "Pasif" : "Hazır"}</mark></header>
+                <p>{card.description}</p>
+                <dl><div><dt>Gerçek kayıt</dt><dd>{card.real}</dd></div><div><dt>Demo kayıt</dt><dd>{card.demo}</dd></div></dl>
+                <Link href={card.href}>Yönetim ekranına git</Link>
+              </article>
+            );
+          })}
+        </div>
       </section>
 
-      <section className="dashboard-section compact-status-section">
-        <DataToolbar title="Gerçek Durum" description="Sadece karar vermeye yetecek servis özeti; ham JSON gösterilmez." />
+      <section className="dashboard-section">
+        <DataToolbar title="Engine konumu" description="Commerce OS Core bağımsızdır. Harici motorların seviyesi açıkça ayrılır." />
         <div className="service-status-grid">
-          <ServiceStatusCard {...readableService(entries, "gateway-api", "Gateway")} />
-          <ServiceStatusCard {...readableService(entries, "medusa", "Medusa")} />
-          <ServiceStatusCard {...readableService(entries, "odoo", "Odoo")} />
-          <ServiceStatusCard label="Queue" status={queueReady ? "Hazır" : "Bekleniyor"} detail="Kuyruk durumu operasyon modülleri açıldığında kullanılır." tone={queueReady ? "ready" : "waiting"} />
-          <ServiceStatusCard label="Audit" status={auditReady ? "Hazır" : "Bekleniyor"} detail="Giriş, tenant ve oturum olayları kayda alınır." tone={auditReady ? "ready" : "waiting"} />
+          <ServiceStatusCard {...service(entries, "gateway-api", "Gateway", "Ana API omurgası yanıt veriyor.")} />
+          <ServiceStatusCard {...service(entries, "medusa", "Medusa Bridge Provider", "Opsiyonel commerce provider / bridge.")} />
+          <ServiceStatusCard {...service(entries, "odoo", "Odoo ERP Engine", "ERP motoru sağlık sinyali.")} />
+          <ServiceStatusCard label="Demo Mode" status={payload.demo?.demoModeEnabled ? "Açık" : "Kapalı"} detail="Demo verisi üretim kayıtlarından açıkça ayrılır." tone={payload.demo?.demoModeEnabled ? "ready" : "waiting"} />
         </div>
       </section>
 
       <section className="dashboard-section">
-        <DataToolbar title="Başlangıç Durumları" description="Veri yoksa kullanıcıyı yönlendiren gerçek operasyon mesajları." />
-        <div className="dashboard-grid-three">
-          <EmptyOperationalState
-            title={tenants.length ? `${tenants.length} tenant kayıtlı` : "Henüz tenant yok. İlk tenant'ı oluştur."}
-            description={tenants.length ? "Tenant yönetim ekranından domain, kullanıcı ve modül adımlarını kontrol edin." : "Yeni Tenant Oluştur aksiyonuyla gerçek provisioning akışını başlatın."}
-            actionLabel="Tenant Yönetimi"
-            href="/tenants"
-          />
-          <EmptyOperationalState title="Henüz satıcı başvurusu yok. Başvuru formunu aktif et." description="Satıcı kabul kurallarını ve KYC beklentilerini hazırlayın." actionLabel="Satıcı Yönetimi" href="/marketplace/sellers" />
-          <EmptyOperationalState title="Henüz ürün yok. Medusa catalog bridge hazır." description="Ürün import ayarını hazırlayın; catalog bridge aktif olduğunda kayıtlar burada görünür." actionLabel="Ürünleri Yönet" href="/catalog/products" />
-          <EmptyOperationalState title="Henüz sipariş akışı başlamadı." description="Checkout ve order bridge hazırlandığında sipariş operasyonları dolacak." actionLabel="Siparişleri Gör" href="/orders" />
-          <EmptyOperationalState title="Henüz ödeme akışı yok. Ödeme sağlayıcılarını yapılandır." description="Cüzdan, payout ve bloke bakiye akışları sağlayıcı bağlantısından sonra açılır." actionLabel="Finans Ayarları" href="/finance/wallets" />
-          <EmptyOperationalState title="Muhasebe mapping bekliyor." description="Odoo muhasebe bağlantısıyla vergi, fatura ve rapor alanları açılır." actionLabel="Muhasebe ve Vergi" href="/accounting/tax" />
+        <DataToolbar title="Son gerçek olaylar" description="Ham JSON yerine son audit sinyalleri." />
+        <div className="audit-readable-list">
+          {payload.demo?.recentAudit?.length ? payload.demo.recentAudit.map((event) => <article key={`${event.action}-${String(event.occurred_at)}`}><strong>{event.action}</strong><span>{event.result}</span><small>{String(event.occurred_at)}</small></article>) : <p className="empty-state">Henüz audit olayı yok.</p>}
         </div>
+      </section>
+
+      <section className="operational-empty">
+        <div><strong>Boş panel, çalışmayan panel değildir.</strong><p>Gerçek kayıt yoksa yeni kayıt oluşturun veya Demo Merkezi üzerinden ayrı etiketli demo lifecycle akışını çalıştırın.</p></div>
+        <Link href="/settings/demo">Demo veriyi yönet</Link>
       </section>
     </AdminShell>
   );

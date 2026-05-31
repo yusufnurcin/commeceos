@@ -9,6 +9,9 @@
     "start": "node dist/server.js",
     "platform:bootstrap": "tsx scripts/platform-bootstrap.ts",
     "platform:bootstrap:direct": "tsx scripts/platform-bootstrap.ts --direct",
+    "demo:seed": "tsx scripts/demo-command.ts seed",
+    "demo:cleanup": "tsx scripts/demo-command.ts cleanup",
+    "demo:status": "tsx scripts/demo-command.ts status",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit"
   },

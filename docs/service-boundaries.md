@@ -6,7 +6,7 @@ Odoo owns ERP-grade workflows and records. It is internal to the platform and sh
 
 ## Medusa
 
-Medusa owns headless commerce engine concerns. Its admin UI is disabled by default because platform experiences are custom-built.
+Medusa is an optional headless commerce provider / bridge. Its admin UI is disabled by default because platform experiences are custom-built. Commerce OS Core remains the source of truth for platform catalog and order records; Medusa sync is controlled through optional job queues.
 
 ## Gateway API
 

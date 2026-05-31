@@ -167,7 +167,7 @@ services:
     restart: unless-stopped
     labels:
       service: medusa
-      layer: headless-commerce-engine
+      layer: optional-commerce-provider-bridge
       runtime: foundation
     logging: *foundation-logging
     depends_on:
@@ -239,6 +239,7 @@ services:
       GATEWAY_SERVICE_TOKEN: ${GATEWAY_SERVICE_TOKEN:-commerce_os_gateway_service_dev_token}
       SECURE_COOKIE_DOMAIN: ${SECURE_COOKIE_DOMAIN:-localhost}
       INTEGRATION_VAULT_SECRET: ${INTEGRATION_VAULT_SECRET:-commerce_os_integration_vault_dev_secret_change_before_prod}
+      DEMO_MODE_ENABLED: ${DEMO_MODE_ENABLED:-false}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@commerceos.local}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-CommerceOS@2026!}
       BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Commerce OS Super Admin}
@@ -255,8 +256,6 @@ services:
       meilisearch:
         condition: service_healthy
       search:
-        condition: service_healthy
-      medusa:
         condition: service_healthy
       odoo:
         condition: service_healthy

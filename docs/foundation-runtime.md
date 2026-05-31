@@ -31,7 +31,7 @@ pnpm health:infra
 ## Runtime Invariants
 
 - Odoo is the ERP engine only.
-- Medusa is the headless commerce engine only.
+- Medusa is an optional commerce provider / bridge. Commerce OS Core catalog and order tables remain independent.
 - Medusa runs `db:migrate --execute-safe-links` before the API process so schema bootstrap is idempotent and seed-free.
 - Medusa packages are pinned to `2.12.2` as a consistent CLI/runtime set for this foundation.
 - Medusa PostgreSQL URLs use `ssl_mode=disable` for the local Docker Postgres cluster.

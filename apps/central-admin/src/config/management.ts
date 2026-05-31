@@ -47,7 +47,7 @@ export const primarySidebarItems: readonly ManagementLink[] = [
   { label: "Finans", href: "/finance/wallets", description: "Cüzdan, ödeme ve payout" },
   { label: "Muhasebe", href: "/accounting/tax", description: "Vergi, fatura ve Odoo muhasebe" },
   { label: "ERP / Odoo", href: "/erp/odoo", description: "Odoo merkezi" },
-  { label: "Medusa", href: "/commerce/medusa", description: "Headless commerce merkezi" },
+  { label: "Medusa", href: "/commerce/medusa", description: "Opsiyonel commerce bridge provider" },
   { label: "Lojistik", href: "/logistics/couriers", description: "Kargo, kurye ve depo" },
   { label: "Destek", href: "/support/tickets", description: "Ticket ve iletişim kanalları" },
   { label: "Pazarlama", href: "/marketing/campaigns", description: "Reklam, kampanya ve kupon" },
@@ -64,7 +64,7 @@ export const quickActions: readonly ManagementLink[] = [
   { label: "Siparişleri Gör", href: "/orders", description: "Tüm sipariş operasyon alanına git" },
   { label: "Ödemeleri Kontrol Et", href: "/finance/wallets", description: "Cüzdan ve payout akışını denetle" },
   { label: "Odoo Merkezi", href: "/erp/odoo", description: "ERP köprü durumunu ve mapping akışını aç" },
-  { label: "Medusa Merkezi", href: "/commerce/medusa", description: "Commerce engine köprülerini yönet" },
+  { label: "Medusa Provider", href: "/commerce/medusa", description: "Opsiyonel sync köprülerini yönet" },
   { label: "Modül Merkezi", href: "/modules", description: "Modül, eklenti ve lisans alanını aç" },
   { label: "Tema Yönetimi", href: "/design/themes", description: "Tema ve storefront başlangıcına git" },
   { label: "Sistem Ayarları", href: "/settings", description: "Dil, para birimi, iletişim ve API ayarları" }
@@ -134,7 +134,7 @@ export const managementAreas: readonly ManagementArea[] = [
     title: "Ürün ve Katalog",
     description: "Ürünler, kategoriler, varyantlar, özellikler ve XML/CSV aktarım akışlarını yönetin.",
     href: "/catalog/products",
-    statusLabel: "Medusa köprüsü bekliyor",
+    statusLabel: "Core hazır, provider opsiyonel",
     statusTone: "setup",
     engineService: "medusa",
     engineLabel: "Medusa Catalog",
@@ -144,8 +144,8 @@ export const managementAreas: readonly ManagementArea[] = [
       { label: "Varyantlar", href: "/catalog/variants", description: "Varyant hazırlığı" },
       { label: "XML / CSV", href: "/catalog/bulk-transfer", description: "Toplu import/export" }
     ],
-    emptyState: "Henüz ürün yok. Medusa catalog bridge hazır.",
-    nextStep: "Ürün import ayarını hazırlayın; Medusa catalog bridge aktif olduğunda ürün akışı başlayacak.",
+    emptyState: "Henüz ürün yok. Commerce OS katalog çekirdeği yeni kayıt bekliyor.",
+    nextStep: "Ürünleri doğrudan Commerce OS Core içinde yönetin. Medusa sync kullanacaksanız opsiyonel provider kuyruğunu açın.",
     operations: [
       { label: "Ürünler", href: "/catalog/products", description: "Global ürün görünürlüğü ve moderasyon" },
       { label: "Onay Bekleyenler", href: "/catalog/comments", description: "Yorum, soru ve ürün moderasyonu" },
@@ -171,7 +171,7 @@ export const managementAreas: readonly ManagementArea[] = [
     title: "Sipariş Operasyonları",
     description: "Tüm siparişler, iadeler, iptaller, fraud şüpheli kayıtlar ve tenant/satıcı kırılımlarını yönetin.",
     href: "/orders",
-    statusLabel: "Sipariş akışı bekliyor",
+    statusLabel: "Core hazır, kayıt bekliyor",
     statusTone: "waiting",
     engineService: "medusa",
     engineLabel: "Medusa Orders",
@@ -181,8 +181,8 @@ export const managementAreas: readonly ManagementArea[] = [
       { label: "İptaller", href: "/orders/refunds", description: "Refund ve iptal akışı" },
       { label: "Fraud", href: "/orders/fraud", description: "Riskli siparişler" }
     ],
-    emptyState: "Henüz sipariş akışı başlamadı. Medusa order bridge hazır olduğunda kayıtlar görünür.",
-    nextStep: "Checkout ve order bridge ayarlarını tamamlayın; gerçek sipariş geldikçe listeler dolacak.",
+    emptyState: "Henüz sipariş akışı başlamadı. Commerce OS sipariş çekirdeği yeni kayıt bekliyor.",
+    nextStep: "Siparişler Commerce OS Core içinde bağımsız tutulur. Medusa sync kullanacaksanız opsiyonel provider kuyruğunu açın.",
     operations: [
       { label: "Tüm Siparişler", href: "/orders", description: "Tenant ve satıcı kapsamlı liste" },
       { label: "Yeni Siparişler", href: "/orders", description: "Yeni gelen sipariş görünürlüğü" },
@@ -308,21 +308,21 @@ export const managementAreas: readonly ManagementArea[] = [
   },
   {
     id: "medusa",
-    title: "Medusa Commerce",
-    description: "Catalog, pricing, cart, checkout, order, tax, inventory ve sync köprülerini yönetin.",
+    title: "Medusa Bridge Provider",
+    description: "Opsiyonel catalog ve order sync köprülerini yönetin. Commerce OS Core kayıtları Medusa olmadan da çalışır.",
     href: "/commerce/medusa",
-    statusLabel: "Medusa hazır",
+    statusLabel: "Opsiyonel provider",
     statusTone: "ready",
     engineService: "medusa",
-    engineLabel: "Medusa Commerce",
-    primaryAction: { label: "Medusa Merkezi", href: "/commerce/medusa", description: "Commerce engine yönetimini aç" },
+    engineLabel: "Medusa Bridge Provider",
+    primaryAction: { label: "Medusa Provider", href: "/commerce/medusa", description: "Opsiyonel sync provider durumunu aç" },
     secondaryActions: [
       { label: "Catalog Bridge", href: "/commerce/catalog-bridge", description: "Ürün köprüsü" },
       { label: "Checkout Bridge", href: "/commerce/cart-checkout", description: "Sepet ve checkout" },
       { label: "Sync Jobs", href: "/commerce/sync-jobs", description: "Senkronizasyon işleri" }
     ],
-    emptyState: "Medusa API hazır. Catalog ve order bridge ayarları bekliyor.",
-    nextStep: "Önce catalog bridge ayarını hazırlayın, sonra pricing ve checkout akışlarını bağlayın.",
+    emptyState: "Medusa provider opsiyoneldir. Commerce OS Core bağımsız çalışır.",
+    nextStep: "Medusa kullanacaksanız catalog veya order sync kuyruğunu kontrollü olarak etkinleştirin.",
     operations: [
       { label: "Medusa Health", href: "/commerce/medusa", description: "Servis durumu" },
       { label: "Catalog Bridge", href: "/commerce/catalog-bridge", description: "Ürün ve katalog sync" },
@@ -524,6 +524,7 @@ export const managementAreas: readonly ManagementArea[] = [
     secondaryActions: [
       { label: "Ülkeler", href: "/localization/countries", description: "Ülke ayarları" },
       { label: "Integration Vault", href: "/settings/integrations", description: "Şifreli credential ve sağlayıcı dayanıklılığı" },
+      { label: "Demo Merkezi", href: "/settings/demo", description: "Açıkça etiketlenmiş demo lifecycle kayıtları" },
       { label: "API Anahtarları", href: "/integrations/api-keys", description: "API erişimleri" },
       { label: "Webhooklar", href: "/integrations/webhooks", description: "Webhook ayarları" }
     ],
@@ -531,6 +532,7 @@ export const managementAreas: readonly ManagementArea[] = [
     nextStep: "Önce platform adı, varsayılan dil, para birimi ve iletişim sağlayıcılarını hazırlayın.",
     operations: [
       { label: "Integration Vault", href: "/settings/integrations", description: "Dış servis credential ve dayanıklılık politikaları" },
+      { label: "Demo Merkezi", href: "/settings/demo", description: "Demo seed ve güvenli cleanup" },
       { label: "Platform adı/logo", href: "/settings", description: "Marka kimliği" },
       { label: "Dil", href: "/localization/languages", description: "Varsayılan dil" },
       { label: "Para birimi", href: "/localization/currencies", description: "Varsayılan para birimi" },

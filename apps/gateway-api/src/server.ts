@@ -159,22 +159,36 @@ const server = createServer(async (request, response) => {
         }
       }
 
-      const route = await handleOperationalRoute({
-        request,
-        method: request.method,
-        pathname,
-        context,
-        auth,
-        env,
-        db,
-        registry,
-        body
-      });
-      writeJson(response, route.statusCode, {
-        ...(typeof route.payload === "object" && route.payload !== null ? route.payload : { payload: route.payload }),
-        correlationId: context.correlationId,
-        traceId: context.traceId
-      });
+      try {
+        const route = await handleOperationalRoute({
+          request,
+          method: request.method,
+          pathname,
+          context,
+          auth,
+          env,
+          db,
+          registry,
+          body
+        });
+        writeJson(response, route.statusCode, {
+          ...(typeof route.payload === "object" && route.payload !== null ? route.payload : { payload: route.payload }),
+          correlationId: context.correlationId,
+          traceId: context.traceId
+        });
+      } catch (error) {
+        writeAudit("gateway.operational_runtime", "failed", context);
+        log("error", "operational_runtime_request_failed", { service: serviceName, ...context }, {
+          pathname,
+          error: error instanceof Error ? error.message : "unknown_error"
+        });
+        writeJson(response, 500, {
+          status: "operational_runtime_error",
+          message: "İşlem güvenli biçimde durduruldu. Gateway çalışmaya devam ediyor.",
+          correlationId: context.correlationId,
+          traceId: context.traceId
+        });
+      }
       return;
     }
 
