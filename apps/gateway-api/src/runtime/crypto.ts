@@ -1,4 +1,13 @@
-import { createHash, createHmac, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  pbkdf2Sync,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual
+} from "node:crypto";
 import type { GatewayEnvironment } from "../config/env";
 
 export interface JwtClaims {
@@ -78,4 +87,32 @@ export function hashPassword(password: string) {
     algorithm: "pbkdf2-sha256",
     encodedHash: `pbkdf2-sha256$${iterations}$${salt}$${hash}`
   };
+}
+
+function integrationVaultKey(secret: string) {
+  return createHash("sha256").update(secret).digest();
+}
+
+export function encryptIntegrationPayload(secret: string, payload: Record<string, unknown>) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", integrationVaultKey(secret), iv);
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `aes-256-gcm:v1:${iv.toString("base64url")}:${authTag.toString("base64url")}:${encrypted.toString("base64url")}`;
+}
+
+export function decryptIntegrationPayload(secret: string, encryptedPayload: string) {
+  const [algorithm, version, ivText, authTagText, encryptedText] = encryptedPayload.split(":");
+  if (algorithm !== "aes-256-gcm" || version !== "v1" || !ivText || !authTagText || !encryptedText) {
+    throw new Error("integration_vault_payload_invalid");
+  }
+
+  const decipher = createDecipheriv("aes-256-gcm", integrationVaultKey(secret), Buffer.from(ivText, "base64url"));
+  decipher.setAuthTag(Buffer.from(authTagText, "base64url"));
+  const decrypted = Buffer.concat([decipher.update(Buffer.from(encryptedText, "base64url")), decipher.final()]).toString("utf8");
+  const payload = JSON.parse(decrypted) as unknown;
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    throw new Error("integration_vault_payload_invalid");
+  }
+  return payload as Record<string, unknown>;
 }

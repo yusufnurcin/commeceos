@@ -523,12 +523,14 @@ export const managementAreas: readonly ManagementArea[] = [
     primaryAction: { label: "Ayarları Aç", href: "/settings", description: "Sistem ayarları alanına git" },
     secondaryActions: [
       { label: "Ülkeler", href: "/localization/countries", description: "Ülke ayarları" },
+      { label: "Integration Vault", href: "/settings/integrations", description: "Şifreli credential ve sağlayıcı dayanıklılığı" },
       { label: "API Anahtarları", href: "/integrations/api-keys", description: "API erişimleri" },
       { label: "Webhooklar", href: "/integrations/webhooks", description: "Webhook ayarları" }
     ],
     emptyState: "Sistem ayarları hazır. Platform kimliği ve iletişim kanallarını belirleyin.",
     nextStep: "Önce platform adı, varsayılan dil, para birimi ve iletişim sağlayıcılarını hazırlayın.",
     operations: [
+      { label: "Integration Vault", href: "/settings/integrations", description: "Dış servis credential ve dayanıklılık politikaları" },
       { label: "Platform adı/logo", href: "/settings", description: "Marka kimliği" },
       { label: "Dil", href: "/localization/languages", description: "Varsayılan dil" },
       { label: "Para birimi", href: "/localization/currencies", description: "Varsayılan para birimi" },

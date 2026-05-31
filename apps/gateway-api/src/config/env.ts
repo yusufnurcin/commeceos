@@ -24,6 +24,7 @@ export interface GatewayEnvironment {
   readonly authJwtSecret: string;
   readonly gatewayServiceToken: string;
   readonly secureCookieDomain: string;
+  readonly integrationVaultSecret: string | undefined;
 }
 
 export function readGatewayEnvironment(env: NodeJS.ProcessEnv = process.env): GatewayEnvironment {
@@ -53,7 +54,8 @@ export function readGatewayEnvironment(env: NodeJS.ProcessEnv = process.env): Ga
     authJwtAudience: env.AUTH_JWT_AUDIENCE ?? "commerce-os-workspaces",
     authJwtSecret: env.AUTH_JWT_SECRET ?? "commerce_os_gateway_jwt_dev_secret_change_before_prod",
     gatewayServiceToken: env.GATEWAY_SERVICE_TOKEN ?? "commerce_os_gateway_service_dev_token",
-    secureCookieDomain: env.SECURE_COOKIE_DOMAIN ?? "localhost"
+    secureCookieDomain: env.SECURE_COOKIE_DOMAIN ?? "localhost",
+    integrationVaultSecret: env.INTEGRATION_VAULT_SECRET ?? env.APP_SECRET
   };
 
   const invalidNumberKeys = [
@@ -74,11 +76,12 @@ export function readGatewayEnvironment(env: NodeJS.ProcessEnv = process.env): Ga
   if (gatewayEnvironment.nodeEnv === "production") {
     const insecureDefaults = [
       ["AUTH_JWT_SECRET", gatewayEnvironment.authJwtSecret, "commerce_os_gateway_jwt_dev_secret_change_before_prod"],
-      ["GATEWAY_SERVICE_TOKEN", gatewayEnvironment.gatewayServiceToken, "commerce_os_gateway_service_dev_token"]
+      ["GATEWAY_SERVICE_TOKEN", gatewayEnvironment.gatewayServiceToken, "commerce_os_gateway_service_dev_token"],
+      ["INTEGRATION_VAULT_SECRET", gatewayEnvironment.integrationVaultSecret, "commerce_os_integration_vault_dev_secret_change_before_prod"]
     ] as const;
 
     for (const [key, value, defaultValue] of insecureDefaults) {
-      if (value === defaultValue) {
+      if (!value || value === defaultValue) {
         throw new Error(`Production requires a non-default secret: ${key}`);
       }
     }

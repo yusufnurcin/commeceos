@@ -210,6 +210,92 @@ CREATE TABLE IF NOT EXISTS platform_plugin_events (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS platform_integration_providers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  key text NOT NULL UNIQUE,
+  name text NOT NULL,
+  category text NOT NULL,
+  description text NOT NULL,
+  status text NOT NULL DEFAULT 'available',
+  provider_type text NOT NULL,
+  is_core boolean NOT NULL DEFAULT false,
+  is_enabled boolean NOT NULL DEFAULT false,
+  supports_test_connection boolean NOT NULL DEFAULT false,
+  supports_fallback boolean NOT NULL DEFAULT false,
+  required_plugin_key text,
+  required_module_key text,
+  capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
+  credential_schema jsonb NOT NULL DEFAULT '{}'::jsonb,
+  settings_schema jsonb NOT NULL DEFAULT '{}'::jsonb,
+  health_check_schema jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT platform_integration_providers_key_check CHECK (key ~ '^[a-z0-9][a-z0-9_-]{1,63}$'),
+  CONSTRAINT platform_integration_providers_status_check CHECK (status IN ('available', 'active', 'disabled', 'degraded'))
+);
+
+CREATE TABLE IF NOT EXISTS platform_integration_credentials (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_id uuid NOT NULL REFERENCES platform_integration_providers(id) ON DELETE CASCADE,
+  tenant_id text REFERENCES tenant_registry.tenants(tenant_id) ON DELETE CASCADE,
+  scope text NOT NULL,
+  label text NOT NULL,
+  encrypted_payload text NOT NULL,
+  masked_summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+  status text NOT NULL DEFAULT 'configured',
+  last_test_status text,
+  last_test_at timestamptz,
+  last_error text,
+  created_by_principal_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT platform_integration_credentials_scope_check CHECK (scope IN ('platform', 'tenant')),
+  CONSTRAINT platform_integration_credentials_status_check CHECK (status IN ('configured', 'invalid', 'revoked'))
+);
+
+CREATE TABLE IF NOT EXISTS platform_integration_health (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_id uuid NOT NULL REFERENCES platform_integration_providers(id) ON DELETE CASCADE,
+  tenant_id text REFERENCES tenant_registry.tenants(tenant_id) ON DELETE CASCADE,
+  status text NOT NULL,
+  latency_ms integer,
+  last_checked_at timestamptz NOT NULL DEFAULT now(),
+  last_error text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS platform_integration_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_id uuid REFERENCES platform_integration_providers(id) ON DELETE SET NULL,
+  credential_id uuid REFERENCES platform_integration_credentials(id) ON DELETE SET NULL,
+  tenant_id text REFERENCES tenant_registry.tenants(tenant_id) ON DELETE SET NULL,
+  event_type text NOT NULL,
+  actor_principal_id uuid,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS platform_provider_resilience_policies (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_id uuid NOT NULL UNIQUE REFERENCES platform_integration_providers(id) ON DELETE CASCADE,
+  timeout_ms integer NOT NULL DEFAULT 5000,
+  retry_count integer NOT NULL DEFAULT 2,
+  retry_backoff_ms integer NOT NULL DEFAULT 500,
+  circuit_breaker_enabled boolean NOT NULL DEFAULT true,
+  circuit_breaker_failure_threshold integer NOT NULL DEFAULT 5,
+  circuit_breaker_cooldown_seconds integer NOT NULL DEFAULT 60,
+  fallback_provider_key text,
+  queue_on_failure boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT platform_provider_resilience_timeout_check CHECK (timeout_ms BETWEEN 100 AND 120000),
+  CONSTRAINT platform_provider_resilience_retry_count_check CHECK (retry_count BETWEEN 0 AND 10),
+  CONSTRAINT platform_provider_resilience_retry_backoff_check CHECK (retry_backoff_ms BETWEEN 0 AND 60000),
+  CONSTRAINT platform_provider_resilience_failure_threshold_check CHECK (circuit_breaker_failure_threshold BETWEEN 1 AND 100),
+  CONSTRAINT platform_provider_resilience_cooldown_check CHECK (circuit_breaker_cooldown_seconds BETWEEN 1 AND 86400)
+);
+
 CREATE TABLE IF NOT EXISTS platform_themes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   key text NOT NULL UNIQUE,
@@ -290,6 +376,11 @@ CREATE INDEX IF NOT EXISTS platform_plugins_category_status_idx ON platform_plug
 CREATE INDEX IF NOT EXISTS platform_plugin_settings_plugin_idx ON platform_plugin_settings (plugin_id, tenant_id);
 CREATE INDEX IF NOT EXISTS platform_plugin_events_plugin_idx ON platform_plugin_events (plugin_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS platform_plugin_events_tenant_idx ON platform_plugin_events (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS platform_integration_providers_category_status_idx ON platform_integration_providers (category, status, is_enabled);
+CREATE INDEX IF NOT EXISTS platform_integration_credentials_provider_idx ON platform_integration_credentials (provider_id, tenant_id, status);
+CREATE INDEX IF NOT EXISTS platform_integration_health_provider_idx ON platform_integration_health (provider_id, tenant_id, last_checked_at DESC);
+CREATE INDEX IF NOT EXISTS platform_integration_events_provider_idx ON platform_integration_events (provider_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS platform_integration_events_credential_idx ON platform_integration_events (credential_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS platform_themes_industry_category_idx ON platform_themes (industry, category, status);
 CREATE INDEX IF NOT EXISTS platform_theme_assignments_theme_idx ON platform_theme_assignments (theme_id, status);
 CREATE INDEX IF NOT EXISTS platform_theme_events_tenant_idx ON platform_theme_events (tenant_id, created_at DESC);

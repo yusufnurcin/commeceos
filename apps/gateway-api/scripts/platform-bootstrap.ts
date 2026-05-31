@@ -371,6 +371,75 @@ const corePluginSeeds = [
   { key: "medusa_order_bridge", name: "Medusa Order Bridge", category: "commerce", description: "Medusa sipariş köprüsü ve order sync manifesti.", requiredModules: ["plugins", "medusa_commerce", "orders"], capabilities: ["medusa.orders", "sync.jobs"], permissions: ["plugins.commerce.manage"] }
 ] as const;
 
+const credentialFields = {
+  smtp: [
+    { key: "host", label: "SMTP sunucusu", type: "text", required: true, secret: false },
+    { key: "port", label: "Port", type: "text", required: true, secret: false },
+    { key: "username", label: "Kullanıcı adı", type: "text", required: true, secret: false },
+    { key: "password", label: "Parola", type: "password", required: true, secret: true }
+  ],
+  apiKey: [{ key: "apiKey", label: "API anahtarı", type: "password", required: true, secret: true }],
+  token: [{ key: "accessToken", label: "Erişim tokenı", type: "password", required: true, secret: true }],
+  payment: [
+    { key: "publicKey", label: "Public key", type: "text", required: true, secret: false },
+    { key: "secretKey", label: "Secret key", type: "password", required: true, secret: true }
+  ],
+  carrier: [
+    { key: "accountCode", label: "Müşteri kodu", type: "text", required: true, secret: false },
+    { key: "password", label: "Servis parolası", type: "password", required: true, secret: true }
+  ],
+  sip: [
+    { key: "host", label: "SIP sunucusu", type: "text", required: true, secret: false },
+    { key: "username", label: "Kullanıcı adı", type: "text", required: true, secret: false },
+    { key: "password", label: "Parola", type: "password", required: true, secret: true }
+  ],
+  odoo: [
+    { key: "baseUrl", label: "Odoo adresi", type: "text", required: true, secret: false },
+    { key: "database", label: "Veritabanı", type: "text", required: true, secret: false },
+    { key: "apiKey", label: "API anahtarı", type: "password", required: true, secret: true }
+  ],
+  endpointToken: [
+    { key: "baseUrl", label: "Servis adresi", type: "text", required: true, secret: false },
+    { key: "apiKey", label: "API anahtarı", type: "password", required: true, secret: true }
+  ]
+} as const;
+
+const coreProviderSeeds = [
+  { key: "smtp", name: "SMTP", category: "email", providerType: "email", description: "SMTP e-posta sağlayıcısı.", requiredPluginKey: "smtp_email", requiredModuleKey: "notifications", capabilities: ["email.send", "email.transactional"], fields: credentialFields.smtp },
+  { key: "mailgun", name: "Mailgun", category: "email", providerType: "email", description: "Mailgun e-posta sağlayıcısı.", requiredPluginKey: "smtp_email", requiredModuleKey: "notifications", capabilities: ["email.send", "email.webhooks"], fields: credentialFields.apiKey },
+  { key: "sendgrid", name: "SendGrid", category: "email", providerType: "email", description: "SendGrid e-posta sağlayıcısı.", requiredPluginKey: "smtp_email", requiredModuleKey: "notifications", capabilities: ["email.send", "email.templates"], fields: credentialFields.apiKey },
+  { key: "netgsm", name: "Netgsm", category: "sms", providerType: "sms", description: "Netgsm SMS sağlayıcısı.", requiredPluginKey: "sms_gateway", requiredModuleKey: "notifications", capabilities: ["sms.send", "sms.delivery_status"], fields: credentialFields.apiKey },
+  { key: "twilio_sms", name: "Twilio SMS", category: "sms", providerType: "sms", description: "Twilio SMS sağlayıcısı.", requiredPluginKey: "sms_gateway", requiredModuleKey: "notifications", capabilities: ["sms.send", "sms.delivery_status"], fields: credentialFields.apiKey },
+  { key: "vonage_sms", name: "Vonage SMS", category: "sms", providerType: "sms", description: "Vonage SMS sağlayıcısı.", requiredPluginKey: "sms_gateway", requiredModuleKey: "notifications", capabilities: ["sms.send", "sms.delivery_status"], fields: credentialFields.apiKey },
+  { key: "whatsapp_cloud", name: "WhatsApp Cloud", category: "whatsapp", providerType: "messaging", description: "WhatsApp Cloud mesajlaşma sağlayıcısı.", requiredPluginKey: "whatsapp_business", requiredModuleKey: "notifications", capabilities: ["whatsapp.messages", "whatsapp.templates"], fields: credentialFields.token },
+  { key: "whatsapp_business_provider", name: "WhatsApp Business Provider", category: "whatsapp", providerType: "messaging", description: "WhatsApp Business çözüm sağlayıcı bağlantısı.", requiredPluginKey: "whatsapp_business", requiredModuleKey: "notifications", capabilities: ["whatsapp.messages", "whatsapp.delivery_status"], fields: credentialFields.token },
+  { key: "stripe", name: "Stripe", category: "payments", providerType: "payment", description: "Stripe ödeme sağlayıcısı.", requiredPluginKey: "stripe_payments", requiredModuleKey: "payments", capabilities: ["payments.capture", "payments.refund"], fields: credentialFields.payment },
+  { key: "paypal", name: "PayPal", category: "payments", providerType: "payment", description: "PayPal ödeme sağlayıcısı.", requiredPluginKey: "paypal_payments", requiredModuleKey: "payments", capabilities: ["payments.capture", "payments.refund"], fields: credentialFields.payment },
+  { key: "iyzico", name: "iyzico", category: "payments", providerType: "payment", description: "iyzico ödeme sağlayıcısı.", requiredPluginKey: "iyzico_payments", requiredModuleKey: "payments", capabilities: ["payments.capture", "payments.installments"], fields: credentialFields.payment },
+  { key: "paytr", name: "PayTR", category: "payments", providerType: "payment", description: "PayTR ödeme sağlayıcısı.", requiredModuleKey: "payments", capabilities: ["payments.capture"], fields: credentialFields.payment },
+  { key: "payu", name: "PayU", category: "payments", providerType: "payment", description: "PayU ödeme sağlayıcısı.", requiredModuleKey: "payments", capabilities: ["payments.capture"], fields: credentialFields.payment },
+  { key: "klarna", name: "Klarna", category: "payments", providerType: "payment", description: "Klarna ödeme sağlayıcısı.", requiredModuleKey: "payments", capabilities: ["payments.capture", "payments.installments"], fields: credentialFields.payment },
+  { key: "apple_pay", name: "Apple Pay", category: "payments", providerType: "wallet", description: "Apple Pay cüzdan sağlayıcısı.", requiredModuleKey: "payments", capabilities: ["payments.wallet"], fields: credentialFields.payment },
+  { key: "google_pay", name: "Google Pay", category: "payments", providerType: "wallet", description: "Google Pay cüzdan sağlayıcısı.", requiredModuleKey: "payments", capabilities: ["payments.wallet"], fields: credentialFields.payment },
+  { key: "generic_shipping", name: "Generic Shipping", category: "shipping", providerType: "shipping", description: "Genel kargo sağlayıcı kontratı.", requiredPluginKey: "cargo_provider", requiredModuleKey: "logistics", capabilities: ["shipping.labels", "shipping.tracking"], fields: credentialFields.carrier },
+  { key: "yurtici", name: "Yurtiçi Kargo", category: "shipping", providerType: "shipping", description: "Yurtiçi Kargo sağlayıcısı.", requiredPluginKey: "cargo_provider", requiredModuleKey: "logistics", capabilities: ["shipping.labels", "shipping.tracking"], fields: credentialFields.carrier },
+  { key: "aras", name: "Aras Kargo", category: "shipping", providerType: "shipping", description: "Aras Kargo sağlayıcısı.", requiredPluginKey: "cargo_provider", requiredModuleKey: "logistics", capabilities: ["shipping.labels", "shipping.tracking"], fields: credentialFields.carrier },
+  { key: "mng", name: "MNG Kargo", category: "shipping", providerType: "shipping", description: "MNG Kargo sağlayıcısı.", requiredPluginKey: "cargo_provider", requiredModuleKey: "logistics", capabilities: ["shipping.labels", "shipping.tracking"], fields: credentialFields.carrier },
+  { key: "ptt", name: "PTT Kargo", category: "shipping", providerType: "shipping", description: "PTT Kargo sağlayıcısı.", requiredPluginKey: "cargo_provider", requiredModuleKey: "logistics", capabilities: ["shipping.labels", "shipping.tracking"], fields: credentialFields.carrier },
+  { key: "ups", name: "UPS", category: "shipping", providerType: "shipping", description: "UPS kargo sağlayıcısı.", requiredPluginKey: "cargo_provider", requiredModuleKey: "logistics", capabilities: ["shipping.labels", "shipping.tracking"], fields: credentialFields.carrier },
+  { key: "sip_trunk", name: "SIP Trunk", category: "voice", providerType: "voice", description: "SIP trunk dış arama sağlayıcısı.", requiredModuleKey: "notifications", capabilities: ["voice.outbound"], fields: credentialFields.sip },
+  { key: "twilio_voice", name: "Twilio Voice", category: "voice", providerType: "voice", description: "Twilio dış arama sağlayıcısı.", requiredModuleKey: "notifications", capabilities: ["voice.outbound", "voice.status"], fields: credentialFields.apiKey },
+  { key: "vonage_voice", name: "Vonage Voice", category: "voice", providerType: "voice", description: "Vonage dış arama sağlayıcısı.", requiredModuleKey: "notifications", capabilities: ["voice.outbound", "voice.status"], fields: credentialFields.apiKey },
+  { key: "openai", name: "OpenAI", category: "ai", providerType: "ai", description: "OpenAI model sağlayıcısı.", requiredPluginKey: "ai_content_assistant", requiredModuleKey: "ai", capabilities: ["ai.text", "ai.embeddings"], fields: credentialFields.apiKey },
+  { key: "anthropic", name: "Anthropic", category: "ai", providerType: "ai", description: "Anthropic model sağlayıcısı.", requiredModuleKey: "ai", capabilities: ["ai.text"], fields: credentialFields.apiKey },
+  { key: "local_llm", name: "Local LLM", category: "ai", providerType: "ai", description: "Yerel model servis bağlantısı.", requiredModuleKey: "ai", capabilities: ["ai.text", "ai.local"], fields: credentialFields.endpointToken },
+  { key: "google_maps", name: "Google Maps", category: "maps", providerType: "maps", description: "Google Maps harita sağlayıcısı.", requiredModuleKey: "localization", capabilities: ["maps.geocode", "maps.routes"], fields: credentialFields.apiKey },
+  { key: "openstreetmap", name: "OpenStreetMap", category: "maps", providerType: "maps", description: "OpenStreetMap servis bağlantısı.", requiredModuleKey: "localization", capabilities: ["maps.geocode", "maps.routes"], fields: credentialFields.endpointToken },
+  { key: "odoo_accounting", name: "Odoo Accounting", category: "accounting", providerType: "accounting", description: "Odoo muhasebe servis bağlantısı.", requiredPluginKey: "odoo_accounting_bridge", requiredModuleKey: "accounting", capabilities: ["accounting.sync", "accounting.documents"], fields: credentialFields.odoo },
+  { key: "e_invoice_provider", name: "E-Fatura Sağlayıcısı", category: "accounting", providerType: "invoice", description: "E-fatura servis sağlayıcısı.", requiredPluginKey: "invoice_export", requiredModuleKey: "invoicing", capabilities: ["invoice.issue", "invoice.status"], fields: credentialFields.endpointToken },
+  { key: "e_archive_provider", name: "E-Arşiv Sağlayıcısı", category: "accounting", providerType: "invoice", description: "E-arşiv servis sağlayıcısı.", requiredPluginKey: "invoice_export", requiredModuleKey: "invoicing", capabilities: ["archive.issue", "archive.status"], fields: credentialFields.endpointToken }
+] as const;
+
 function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -582,6 +651,98 @@ async function seedCorePlugins(client: PoolClient, actorPrincipalId: string) {
   }
 }
 
+function providerCredentialSchema(provider: (typeof coreProviderSeeds)[number]) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    fields: provider.fields
+  };
+}
+
+function providerSettingsSchema(provider: (typeof coreProviderSeeds)[number]) {
+  return {
+    type: "object",
+    additionalProperties: true,
+    providerKey: provider.key,
+    fields: [
+      { key: "mode", label: "Çalışma modu", type: "select", required: true, options: ["test", "live"] }
+    ]
+  };
+}
+
+async function seedCoreProviders(client: PoolClient, actorPrincipalId: string) {
+  for (const provider of coreProviderSeeds) {
+    const requiredPluginKey = "requiredPluginKey" in provider ? provider.requiredPluginKey : null;
+    const result = await client.query<{ readonly id: string; readonly inserted: boolean }>(
+      `INSERT INTO platform_integration_providers
+        (key, name, category, description, status, provider_type, is_core, is_enabled,
+         supports_test_connection, supports_fallback, required_plugin_key, required_module_key,
+         capabilities, credential_schema, settings_schema, health_check_schema)
+       VALUES ($1, $2, $3, $4, 'available', $5, true, false, true, true, $6, $7,
+               $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb)
+       ON CONFLICT (key) DO UPDATE
+       SET name = excluded.name,
+           category = excluded.category,
+           description = excluded.description,
+           provider_type = excluded.provider_type,
+           is_core = true,
+           supports_test_connection = excluded.supports_test_connection,
+           supports_fallback = excluded.supports_fallback,
+           required_plugin_key = excluded.required_plugin_key,
+           required_module_key = excluded.required_module_key,
+           capabilities = excluded.capabilities,
+           credential_schema = excluded.credential_schema,
+           settings_schema = excluded.settings_schema,
+           health_check_schema = excluded.health_check_schema,
+           updated_at = now()
+       RETURNING id, (xmax = 0) AS inserted`,
+      [
+        provider.key,
+        provider.name,
+        provider.category,
+        provider.description,
+        provider.providerType,
+        requiredPluginKey,
+        provider.requiredModuleKey,
+        JSON.stringify(provider.capabilities),
+        JSON.stringify(providerCredentialSchema(provider)),
+        JSON.stringify(providerSettingsSchema(provider)),
+        JSON.stringify({ adapterContract: "config-validation-only", networkProbeEnabled: false })
+      ]
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      continue;
+    }
+
+    await client.query(
+      `INSERT INTO platform_provider_resilience_policies
+        (provider_id, timeout_ms, retry_count, retry_backoff_ms, circuit_breaker_enabled,
+         circuit_breaker_failure_threshold, circuit_breaker_cooldown_seconds, fallback_provider_key, queue_on_failure)
+       VALUES ($1, 5000, 2, 500, true, 5, 60, NULL, true)
+       ON CONFLICT (provider_id) DO NOTHING`,
+      [row.id]
+    );
+
+    if (row.inserted) {
+      await client.query(
+        `INSERT INTO platform_integration_events
+          (provider_id, credential_id, tenant_id, event_type, actor_principal_id, payload)
+         VALUES ($1, NULL, NULL, 'integration_provider_seeded', $2::uuid, $3::jsonb)`,
+        [row.id, actorPrincipalId, JSON.stringify({ key: provider.key, category: provider.category })]
+      );
+      await client.query(
+        `INSERT INTO operational_audit.audit_events
+          (tenant_id, workspace_id, actor_id, actor_type, action, resource, result, payload, correlation_id, trace_id)
+         VALUES ('platform', 'central-admin', $1, 'system', 'integration_provider_seeded', 'integration-vault', 'accepted',
+                 $2::jsonb, 'platform-bootstrap', 'platform-bootstrap')`,
+        [actorPrincipalId, JSON.stringify({ providerId: row.id, key: provider.key, category: provider.category })]
+      );
+    }
+  }
+}
+
 function loadInitSql(fileName: string) {
   const filePath = resolve(repoRoot, "infra/postgres/init", fileName);
   return readFileSync(filePath, "utf8")
@@ -724,6 +885,7 @@ async function runBootstrap() {
     await seedCoreModules(client);
     await seedCoreThemes(client, principalId);
     await seedCorePlugins(client, principalId);
+    await seedCoreProviders(client, principalId);
 
     await client.query(
       `INSERT INTO operational_audit.audit_events

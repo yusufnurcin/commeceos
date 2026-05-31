@@ -26,7 +26,14 @@ import {
   type WorkspaceType
 } from "@commerce-os/tenant-core";
 import type { GatewayEnvironment } from "../config/env";
-import { randomToken, sha256, signAccessToken, verifyPassword } from "../runtime/crypto";
+import {
+  decryptIntegrationPayload,
+  encryptIntegrationPayload,
+  randomToken,
+  sha256,
+  signAccessToken,
+  verifyPassword
+} from "../runtime/crypto";
 import type { RuntimeDatabase, RuntimeDatabaseClient } from "../runtime/db";
 import { isRuntimeStoreUnavailable } from "../runtime/db";
 import type { RequestContext } from "../runtime/request-context";
@@ -205,8 +212,89 @@ interface PlatformPluginEventRow {
   readonly created_at: Date | string;
 }
 
+interface PlatformIntegrationProviderRow {
+  readonly id: string;
+  readonly key: string;
+  readonly name: string;
+  readonly category: string;
+  readonly description: string;
+  readonly status: string;
+  readonly provider_type: string;
+  readonly is_core: boolean;
+  readonly is_enabled: boolean;
+  readonly supports_test_connection: boolean;
+  readonly supports_fallback: boolean;
+  readonly required_plugin_key: string | null;
+  readonly required_module_key: string | null;
+  readonly capabilities: unknown;
+  readonly credential_schema: unknown;
+  readonly settings_schema: unknown;
+  readonly health_check_schema: unknown;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
+interface PlatformIntegrationCredentialRow {
+  readonly id: string;
+  readonly provider_id: string;
+  readonly tenant_id: string | null;
+  readonly scope: string;
+  readonly label: string;
+  readonly encrypted_payload: string;
+  readonly masked_summary: unknown;
+  readonly status: string;
+  readonly last_test_status: string | null;
+  readonly last_test_at: Date | string | null;
+  readonly last_error: string | null;
+  readonly created_by_principal_id: string | null;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+  readonly provider_key?: string;
+  readonly provider_name?: string;
+}
+
+interface PlatformIntegrationHealthRow {
+  readonly id: string;
+  readonly provider_id: string;
+  readonly tenant_id: string | null;
+  readonly status: string;
+  readonly latency_ms: number | null;
+  readonly last_checked_at: Date | string;
+  readonly last_error: string | null;
+  readonly metadata: unknown;
+  readonly created_at: Date | string;
+}
+
+interface PlatformIntegrationEventRow {
+  readonly id: string;
+  readonly provider_id: string | null;
+  readonly credential_id: string | null;
+  readonly tenant_id: string | null;
+  readonly event_type: string;
+  readonly actor_principal_id: string | null;
+  readonly payload: unknown;
+  readonly created_at: Date | string;
+}
+
+interface PlatformProviderResiliencePolicyRow {
+  readonly id: string;
+  readonly provider_id: string;
+  readonly timeout_ms: number;
+  readonly retry_count: number;
+  readonly retry_backoff_ms: number;
+  readonly circuit_breaker_enabled: boolean;
+  readonly circuit_breaker_failure_threshold: number;
+  readonly circuit_breaker_cooldown_seconds: number;
+  readonly fallback_provider_key: string | null;
+  readonly queue_on_failure: boolean;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
+}
+
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const moduleKeyPattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
+const credentialFieldKeyPattern = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const publicAuthRuntimePaths = new Set([
   "/v1/auth/login",
@@ -471,7 +559,35 @@ async function writePluginEvent(
   });
 }
 
-function jsonObject(value: unknown) {
+async function writeIntegrationEvent(
+  db: RuntimeDatabase | RuntimeDatabaseClient,
+  input: OperationalRouteInput,
+  eventType: string,
+  payload: JsonRecord = {},
+  scope: { readonly providerId?: string | null; readonly credentialId?: string | null; readonly tenantId?: string | null } = {}
+) {
+  await db.query(
+    `INSERT INTO platform_integration_events
+      (provider_id, credential_id, tenant_id, event_type, actor_principal_id, payload)
+     VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6::jsonb)`,
+    [
+      scope.providerId ?? null,
+      scope.credentialId ?? null,
+      scope.tenantId ?? null,
+      eventType,
+      actorPrincipalId(input),
+      payload
+    ]
+  );
+  await writeAudit(db, input, eventType, "accepted", {
+    providerId: scope.providerId ?? null,
+    credentialId: scope.credentialId ?? null,
+    tenantId: scope.tenantId ?? null,
+    ...payload
+  });
+}
+
+function jsonObject(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -598,6 +714,171 @@ function serializePlugin(row: PlatformPluginRow) {
     capabilities: row.capabilities,
     settingsSchema: row.settings_schema,
     installManifest: row.install_manifest,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+interface IntegrationCredentialField {
+  readonly key: string;
+  readonly label: string;
+  readonly type: string;
+  readonly required: boolean;
+  readonly secret: boolean;
+}
+
+function integrationCredentialFields(value: unknown): readonly IntegrationCredentialField[] {
+  if (!jsonObject(value) || !Array.isArray((value as { readonly fields?: unknown }).fields)) {
+    return [];
+  }
+
+  return (value as { readonly fields: readonly unknown[] }).fields.flatMap((field) => {
+    if (!jsonObject(field)) {
+      return [];
+    }
+
+    const key = asString(field.key);
+    const label = asString(field.label);
+    const type = asString(field.type) ?? "text";
+    if (!key || !label || !credentialFieldKeyPattern.test(key)) {
+      return [];
+    }
+
+    return [
+      {
+        key,
+        label,
+        type,
+        required: field.required === true,
+        secret: field.secret === true
+      }
+    ];
+  });
+}
+
+function validateIntegrationCredentialPayload(provider: PlatformIntegrationProviderRow, payload: unknown) {
+  if (!jsonObject(payload)) {
+    return { valid: false, missingFields: [] as string[], invalidFields: ["credentials"] };
+  }
+
+  const fields = integrationCredentialFields(provider.credential_schema);
+  const missingFields = fields
+    .filter((field) => field.required && !asString(payload[field.key]))
+    .map((field) => field.key);
+  const invalidFields = fields
+    .filter((field) => payload[field.key] !== undefined && typeof payload[field.key] !== "string")
+    .map((field) => field.key);
+
+  return {
+    valid: missingFields.length === 0 && invalidFields.length === 0,
+    missingFields,
+    invalidFields
+  };
+}
+
+function maskIntegrationCredentialValue(value: unknown) {
+  const text = typeof value === "string" ? value : String(value ?? "");
+  const suffix = text.slice(-4);
+  return `${"*".repeat(Math.max(8, text.length - suffix.length))}${suffix}`;
+}
+
+function maskedIntegrationCredentialSummary(provider: PlatformIntegrationProviderRow, payload: JsonRecord) {
+  return Object.fromEntries(
+    integrationCredentialFields(provider.credential_schema)
+      .filter((field) => payload[field.key] !== undefined)
+      .map((field) => [field.key, maskIntegrationCredentialValue(payload[field.key])])
+  );
+}
+
+function serializeIntegrationCredential(row: PlatformIntegrationCredentialRow) {
+  return {
+    id: row.id,
+    providerId: row.provider_id,
+    providerKey: row.provider_key,
+    providerName: row.provider_name,
+    tenantId: row.tenant_id,
+    scope: row.scope,
+    label: row.label,
+    maskedSummary: row.masked_summary,
+    status: row.status,
+    lastTestStatus: row.last_test_status,
+    lastTestAt: row.last_test_at,
+    lastError: row.last_error,
+    createdByPrincipalId: row.created_by_principal_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeIntegrationHealth(row: PlatformIntegrationHealthRow | undefined) {
+  if (!row) {
+    return {
+      status: "not_checked",
+      message: "Bu sağlayıcı için henüz bağlantı testi çalıştırılmadı."
+    };
+  }
+
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    status: row.status,
+    latencyMs: row.latency_ms,
+    lastCheckedAt: row.last_checked_at,
+    lastError: row.last_error,
+    metadata: row.metadata
+  };
+}
+
+function serializeProviderResiliencePolicy(row: PlatformProviderResiliencePolicyRow | undefined) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    timeoutMs: row.timeout_ms,
+    retryCount: row.retry_count,
+    retryBackoffMs: row.retry_backoff_ms,
+    circuitBreakerEnabled: row.circuit_breaker_enabled,
+    failureThreshold: row.circuit_breaker_failure_threshold,
+    cooldownSeconds: row.circuit_breaker_cooldown_seconds,
+    fallbackProviderKey: row.fallback_provider_key,
+    queueOnFailure: row.queue_on_failure,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function serializeIntegrationProvider(
+  row: PlatformIntegrationProviderRow,
+  extra: {
+    readonly credentials?: readonly PlatformIntegrationCredentialRow[];
+    readonly health?: PlatformIntegrationHealthRow;
+    readonly policy?: PlatformProviderResiliencePolicyRow;
+  } = {}
+) {
+  return {
+    id: row.id,
+    key: row.key,
+    name: row.name,
+    category: row.category,
+    description: row.description,
+    status: row.status,
+    providerType: row.provider_type,
+    isCore: row.is_core,
+    isEnabled: row.is_enabled,
+    supportsTestConnection: row.supports_test_connection,
+    supportsFallback: row.supports_fallback,
+    requiredPluginKey: row.required_plugin_key,
+    requiredModuleKey: row.required_module_key,
+    capabilities: row.capabilities,
+    credentialSchema: row.credential_schema,
+    settingsSchema: row.settings_schema,
+    healthCheckSchema: row.health_check_schema,
+    credentials: (extra.credentials ?? []).map(serializeIntegrationCredential),
+    credentialCount: extra.credentials?.length ?? 0,
+    health: serializeIntegrationHealth(extra.health),
+    resiliencePolicy: serializeProviderResiliencePolicy(extra.policy),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -1838,6 +2119,621 @@ async function handlePluginRoute(input: OperationalRouteInput) {
   return json(404, { status: "plugin_route_not_found", path: input.pathname });
 }
 
+async function findIntegrationProvider(db: RuntimeDatabase | RuntimeDatabaseClient, key: string) {
+  return db.one<PlatformIntegrationProviderRow>(
+    `SELECT id, key, name, category, description, status, provider_type, is_core, is_enabled,
+            supports_test_connection, supports_fallback, required_plugin_key, required_module_key,
+            capabilities, credential_schema, settings_schema, health_check_schema, created_at, updated_at
+     FROM platform_integration_providers
+     WHERE key = $1
+     LIMIT 1`,
+    [key]
+  );
+}
+
+async function findIntegrationCredential(db: RuntimeDatabase | RuntimeDatabaseClient, id: string) {
+  return db.one<PlatformIntegrationCredentialRow>(
+    `SELECT c.id, c.provider_id, c.tenant_id, c.scope, c.label, c.encrypted_payload, c.masked_summary,
+            c.status, c.last_test_status, c.last_test_at, c.last_error, c.created_by_principal_id,
+            c.created_at, c.updated_at, p.key AS provider_key, p.name AS provider_name
+     FROM platform_integration_credentials c
+     JOIN platform_integration_providers p ON p.id = c.provider_id
+     WHERE c.id = $1::uuid
+     LIMIT 1`,
+    [id]
+  );
+}
+
+async function getIntegrationProviderCredentials(db: RuntimeDatabase | RuntimeDatabaseClient, providerId: string) {
+  return db.query<PlatformIntegrationCredentialRow>(
+    `SELECT c.id, c.provider_id, c.tenant_id, c.scope, c.label, c.encrypted_payload, c.masked_summary,
+            c.status, c.last_test_status, c.last_test_at, c.last_error, c.created_by_principal_id,
+            c.created_at, c.updated_at, p.key AS provider_key, p.name AS provider_name
+     FROM platform_integration_credentials c
+     JOIN platform_integration_providers p ON p.id = c.provider_id
+     WHERE c.provider_id = $1 AND c.status <> 'revoked'
+     ORDER BY c.updated_at DESC`,
+    [providerId]
+  );
+}
+
+async function getIntegrationProviderHealth(db: RuntimeDatabase | RuntimeDatabaseClient, providerId: string) {
+  return db.one<PlatformIntegrationHealthRow>(
+    `SELECT id, provider_id, tenant_id, status, latency_ms, last_checked_at, last_error, metadata, created_at
+     FROM platform_integration_health
+     WHERE provider_id = $1
+     ORDER BY last_checked_at DESC
+     LIMIT 1`,
+    [providerId]
+  );
+}
+
+async function getIntegrationProviderPolicy(db: RuntimeDatabase | RuntimeDatabaseClient, providerId: string) {
+  return db.one<PlatformProviderResiliencePolicyRow>(
+    `SELECT id, provider_id, timeout_ms, retry_count, retry_backoff_ms, circuit_breaker_enabled,
+            circuit_breaker_failure_threshold, circuit_breaker_cooldown_seconds, fallback_provider_key,
+            queue_on_failure, created_at, updated_at
+     FROM platform_provider_resilience_policies
+     WHERE provider_id = $1
+     LIMIT 1`,
+    [providerId]
+  );
+}
+
+async function integrationProviderView(db: RuntimeDatabase | RuntimeDatabaseClient, provider: PlatformIntegrationProviderRow) {
+  const [credentials, health, policy] = await Promise.all([
+    getIntegrationProviderCredentials(db, provider.id),
+    getIntegrationProviderHealth(db, provider.id),
+    getIntegrationProviderPolicy(db, provider.id)
+  ]);
+  return serializeIntegrationProvider(provider, {
+    credentials,
+    ...(health ? { health } : {}),
+    ...(policy ? { policy } : {})
+  });
+}
+
+function parseIntegrationPath(pathname: string) {
+  if (pathname === "/v1/integrations/providers") {
+    return { resource: "providers", collection: true } as const;
+  }
+  if (pathname === "/v1/integrations/credentials") {
+    return { resource: "credentials", collection: true } as const;
+  }
+
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "v1" || parts[1] !== "integrations" || !parts[2] || !parts[3]) {
+    return null;
+  }
+
+  if (parts[2] === "providers") {
+    const key = decodeURIComponent(parts[3]);
+    return moduleKeyPattern.test(key)
+      ? { resource: "providers", collection: false, key, action: parts[4], extra: parts.slice(5) } as const
+      : null;
+  }
+
+  if (parts[2] === "credentials") {
+    const id = decodeURIComponent(parts[3]);
+    return uuidPattern.test(id)
+      ? { resource: "credentials", collection: false, id, action: parts[4], extra: parts.slice(5) } as const
+      : null;
+  }
+
+  return null;
+}
+
+async function handleIntegrationProviderList(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const providers = await input.db.query<PlatformIntegrationProviderRow>(
+      `SELECT id, key, name, category, description, status, provider_type, is_core, is_enabled,
+              supports_test_connection, supports_fallback, required_plugin_key, required_module_key,
+              capabilities, credential_schema, settings_schema, health_check_schema, created_at, updated_at
+       FROM platform_integration_providers
+       ORDER BY category, name`
+    );
+    return json(200, {
+      status: "ok",
+      providers: await Promise.all(providers.map((provider) => integrationProviderView(input.db, provider)))
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "integrations.providers.list" });
+    }
+    throw error;
+  }
+}
+
+async function handleIntegrationProviderDetail(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const provider = await findIntegrationProvider(input.db, key);
+    return provider
+      ? json(200, { status: "ok", provider: await integrationProviderView(input.db, provider) })
+      : json(404, { status: "integration_provider_not_found", key });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "integrations.providers.detail" });
+    }
+    throw error;
+  }
+}
+
+async function handleIntegrationCredentialList(input: OperationalRouteInput) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const credentials = await input.db.query<PlatformIntegrationCredentialRow>(
+      `SELECT c.id, c.provider_id, c.tenant_id, c.scope, c.label, c.encrypted_payload, c.masked_summary,
+              c.status, c.last_test_status, c.last_test_at, c.last_error, c.created_by_principal_id,
+              c.created_at, c.updated_at, p.key AS provider_key, p.name AS provider_name
+       FROM platform_integration_credentials c
+       JOIN platform_integration_providers p ON p.id = c.provider_id
+       WHERE c.status <> 'revoked'
+       ORDER BY c.updated_at DESC`
+    );
+    return json(200, {
+      status: "ok",
+      credentials: credentials.map(serializeIntegrationCredential)
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "integrations.credentials.list" });
+    }
+    throw error;
+  }
+}
+
+async function handleIntegrationCredentialCreate(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  const vaultSecret = input.env.integrationVaultSecret;
+  if (!vaultSecret) {
+    return json(503, { status: "integration_vault_secret_missing" });
+  }
+
+  const credentials = input.body.credentials;
+  const scope = asString(input.body.scope) ?? "platform";
+  const tenantId = asString(input.body.tenantId) ?? null;
+  const label = asString(input.body.label) ?? `${key} credentials`;
+  if (!["platform", "tenant"].includes(scope) || (scope === "tenant" && !tenantId)) {
+    return json(422, { status: "integration_credential_scope_invalid" });
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const provider = await findIntegrationProvider(client, key);
+      if (!provider) {
+        return json(404, { status: "integration_provider_not_found", key });
+      }
+
+      const validation = validateIntegrationCredentialPayload(provider, credentials);
+      if (!validation.valid || !jsonObject(credentials)) {
+        return json(422, { status: "integration_credential_invalid", ...validation });
+      }
+
+      if (tenantId && !(await findTenant(client, tenantId))) {
+        return json(404, { status: "tenant_not_found", tenantId });
+      }
+
+      const maskedSummary = maskedIntegrationCredentialSummary(provider, credentials);
+      const saved = await client.one<PlatformIntegrationCredentialRow>(
+        `INSERT INTO platform_integration_credentials
+          (provider_id, tenant_id, scope, label, encrypted_payload, masked_summary, status, created_by_principal_id)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'configured', $7::uuid)
+         RETURNING id, provider_id, tenant_id, scope, label, encrypted_payload, masked_summary, status,
+                   last_test_status, last_test_at, last_error, created_by_principal_id, created_at, updated_at`,
+        [provider.id, tenantId, scope, label, encryptIntegrationPayload(vaultSecret, credentials), maskedSummary, actorPrincipalId(input)]
+      );
+      if (!saved) {
+        throw new Error("integration_credential_create_failed");
+      }
+
+      await writeIntegrationEvent(
+        client,
+        input,
+        "integration_credential_created",
+        { key, scope, label, maskedFields: Object.keys(maskedSummary) },
+        { providerId: provider.id, credentialId: saved.id, tenantId }
+      );
+      return json(201, { status: "ok", credential: serializeIntegrationCredential({ ...saved, provider_key: key, provider_name: provider.name }) });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "integrations.credentials.create" });
+    }
+    throw error;
+  }
+}
+
+async function handleIntegrationCredentialUpdate(input: OperationalRouteInput, id: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  const credentials = input.body.credentials;
+  const nextLabel = asString(input.body.label);
+  if (credentials === undefined && !nextLabel) {
+    return json(422, { status: "integration_credential_update_invalid" });
+  }
+
+  const vaultSecret = input.env.integrationVaultSecret;
+  if (credentials !== undefined && !vaultSecret) {
+    return json(503, { status: "integration_vault_secret_missing" });
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const credential = await findIntegrationCredential(client, id);
+      if (!credential) {
+        return json(404, { status: "integration_credential_not_found", id });
+      }
+      const provider = credential.provider_key ? await findIntegrationProvider(client, credential.provider_key) : null;
+      if (!provider) {
+        return json(404, { status: "integration_provider_not_found" });
+      }
+
+      let encryptedPayload = credential.encrypted_payload;
+      let maskedSummary = credential.masked_summary;
+      if (credentials !== undefined) {
+        const validation = validateIntegrationCredentialPayload(provider, credentials);
+        if (!validation.valid || !jsonObject(credentials) || !vaultSecret) {
+          return json(422, { status: "integration_credential_invalid", ...validation });
+        }
+        encryptedPayload = encryptIntegrationPayload(vaultSecret, credentials);
+        maskedSummary = maskedIntegrationCredentialSummary(provider, credentials);
+      }
+
+      const saved = await client.one<PlatformIntegrationCredentialRow>(
+        `UPDATE platform_integration_credentials
+         SET label = COALESCE($2, label),
+             encrypted_payload = $3,
+             masked_summary = $4::jsonb,
+             status = 'configured',
+             last_error = NULL,
+             updated_at = now()
+         WHERE id = $1::uuid
+         RETURNING id, provider_id, tenant_id, scope, label, encrypted_payload, masked_summary, status,
+                   last_test_status, last_test_at, last_error, created_by_principal_id, created_at, updated_at`,
+        [id, nextLabel ?? null, encryptedPayload, maskedSummary]
+      );
+      if (!saved) {
+        throw new Error("integration_credential_update_failed");
+      }
+
+      await writeIntegrationEvent(
+        client,
+        input,
+        "integration_credential_updated",
+        { key: provider.key, label: saved.label },
+        { providerId: provider.id, credentialId: id, tenantId: saved.tenant_id }
+      );
+      return json(200, { status: "ok", credential: serializeIntegrationCredential({ ...saved, provider_key: provider.key, provider_name: provider.name }) });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "integrations.credentials.update" });
+    }
+    throw error;
+  }
+}
+
+async function handleIntegrationCredentialDelete(input: OperationalRouteInput, id: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const credential = await findIntegrationCredential(client, id);
+      if (!credential) {
+        return json(404, { status: "integration_credential_not_found", id });
+      }
+      await writeIntegrationEvent(
+        client,
+        input,
+        "integration_credential_deleted",
+        { key: credential.provider_key ?? null, label: credential.label },
+        { providerId: credential.provider_id, credentialId: credential.id, tenantId: credential.tenant_id }
+      );
+      await client.query(`DELETE FROM platform_integration_credentials WHERE id = $1::uuid`, [id]);
+      return json(200, { status: "ok", deletedCredentialId: id });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "integrations.credentials.delete" });
+    }
+    throw error;
+  }
+}
+
+async function handleIntegrationCredentialTest(input: OperationalRouteInput, id: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  const vaultSecret = input.env.integrationVaultSecret;
+  if (!vaultSecret) {
+    return json(503, { status: "integration_vault_secret_missing" });
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const credential = await findIntegrationCredential(client, id);
+      if (!credential) {
+        return json(404, { status: "integration_credential_not_found", id });
+      }
+      const provider = credential.provider_key ? await findIntegrationProvider(client, credential.provider_key) : null;
+      if (!provider) {
+        return json(404, { status: "integration_provider_not_found" });
+      }
+
+      await writeIntegrationEvent(
+        client,
+        input,
+        "integration_test_requested",
+        { key: provider.key },
+        { providerId: provider.id, credentialId: id, tenantId: credential.tenant_id }
+      );
+      const decryptedPayload = decryptIntegrationPayload(vaultSecret, credential.encrypted_payload);
+      const validation = validateIntegrationCredentialPayload(provider, decryptedPayload);
+      if (!validation.valid) {
+        await client.query(
+          `UPDATE platform_integration_credentials
+           SET status = 'invalid', last_test_status = 'config_invalid', last_test_at = now(),
+               last_error = 'credential_schema_invalid', updated_at = now()
+           WHERE id = $1::uuid`,
+          [id]
+        );
+        return json(422, { status: "integration_credential_invalid", ...validation });
+      }
+
+      await writeIntegrationEvent(
+        client,
+        input,
+        "integration_test_config_valid",
+        { key: provider.key },
+        { providerId: provider.id, credentialId: id, tenantId: credential.tenant_id }
+      );
+      const health = await client.one<PlatformIntegrationHealthRow>(
+        `INSERT INTO platform_integration_health
+          (provider_id, tenant_id, status, latency_ms, last_checked_at, last_error, metadata)
+         VALUES ($1, $2, 'adapter_not_configured', NULL, now(), 'network_adapter_not_configured',
+                 $3::jsonb)
+         RETURNING id, provider_id, tenant_id, status, latency_ms, last_checked_at, last_error, metadata, created_at`,
+        [provider.id, credential.tenant_id, { configStatus: "config_valid", networkProbeExecuted: false }]
+      );
+      await client.query(
+        `UPDATE platform_integration_credentials
+         SET status = 'configured', last_test_status = 'adapter_not_configured', last_test_at = now(),
+             last_error = 'network_adapter_not_configured', updated_at = now()
+         WHERE id = $1::uuid`,
+        [id]
+      );
+      await writeIntegrationEvent(
+        client,
+        input,
+        "integration_test_adapter_not_configured",
+        { key: provider.key, configStatus: "config_valid" },
+        { providerId: provider.id, credentialId: id, tenantId: credential.tenant_id }
+      );
+      await writeIntegrationEvent(
+        client,
+        input,
+        "integration_provider_health_checked",
+        { key: provider.key, status: "adapter_not_configured", networkProbeExecuted: false },
+        { providerId: provider.id, credentialId: id, tenantId: credential.tenant_id }
+      );
+      return json(200, {
+        status: "adapter_not_configured",
+        configStatus: "config_valid",
+        message: "Credential yapısı geçerli. Bu fazda ağ adaptörü bağlı olmadığı için dış servis çağrısı yapılmadı.",
+        health: health ? serializeIntegrationHealth(health) : undefined
+      });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "integrations.credentials.test" });
+    }
+    throw error;
+  }
+}
+
+async function handleIntegrationProviderHealth(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const provider = await findIntegrationProvider(input.db, key);
+    if (!provider) {
+      return json(404, { status: "integration_provider_not_found", key });
+    }
+    return json(200, {
+      status: "ok",
+      provider: serializeIntegrationProvider(provider),
+      health: serializeIntegrationHealth(await getIntegrationProviderHealth(input.db, provider.id))
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "integrations.providers.health" });
+    }
+    throw error;
+  }
+}
+
+function resilienceInteger(value: unknown, fallback: number) {
+  const parsed = value === undefined ? fallback : Number(value);
+  return Number.isInteger(parsed) ? parsed : Number.NaN;
+}
+
+async function handleIntegrationProviderResiliencePolicyUpdate(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    return await input.db.transaction(async (client) => {
+      const provider = await findIntegrationProvider(client, key);
+      if (!provider) {
+        return json(404, { status: "integration_provider_not_found", key });
+      }
+      const current = await getIntegrationProviderPolicy(client, provider.id);
+      if (!current) {
+        return json(503, { status: "integration_resilience_policy_unavailable", key });
+      }
+
+      const timeoutMs = resilienceInteger(input.body.timeoutMs, current.timeout_ms);
+      const retryCount = resilienceInteger(input.body.retryCount, current.retry_count);
+      const retryBackoffMs = resilienceInteger(input.body.retryBackoffMs, current.retry_backoff_ms);
+      const failureThreshold = resilienceInteger(input.body.failureThreshold, current.circuit_breaker_failure_threshold);
+      const cooldownSeconds = resilienceInteger(input.body.cooldownSeconds, current.circuit_breaker_cooldown_seconds);
+      const circuitBreakerEnabled =
+        typeof input.body.circuitBreakerEnabled === "boolean" ? input.body.circuitBreakerEnabled : current.circuit_breaker_enabled;
+      const queueOnFailure = typeof input.body.queueOnFailure === "boolean" ? input.body.queueOnFailure : current.queue_on_failure;
+      const fallbackProviderKey = asString(input.body.fallbackProviderKey) ?? null;
+      const invalid =
+        timeoutMs < 100 || timeoutMs > 120000 ||
+        retryCount < 0 || retryCount > 10 ||
+        retryBackoffMs < 0 || retryBackoffMs > 60000 ||
+        failureThreshold < 1 || failureThreshold > 100 ||
+        cooldownSeconds < 1 || cooldownSeconds > 86400;
+      if (invalid) {
+        return json(422, { status: "integration_resilience_policy_invalid" });
+      }
+      if (fallbackProviderKey && (fallbackProviderKey === key || !(await findIntegrationProvider(client, fallbackProviderKey)))) {
+        return json(422, { status: "integration_fallback_provider_invalid", fallbackProviderKey });
+      }
+
+      const saved = await client.one<PlatformProviderResiliencePolicyRow>(
+        `UPDATE platform_provider_resilience_policies
+         SET timeout_ms = $2, retry_count = $3, retry_backoff_ms = $4,
+             circuit_breaker_enabled = $5, circuit_breaker_failure_threshold = $6,
+             circuit_breaker_cooldown_seconds = $7, fallback_provider_key = $8,
+             queue_on_failure = $9, updated_at = now()
+         WHERE provider_id = $1
+         RETURNING id, provider_id, timeout_ms, retry_count, retry_backoff_ms, circuit_breaker_enabled,
+                   circuit_breaker_failure_threshold, circuit_breaker_cooldown_seconds, fallback_provider_key,
+                   queue_on_failure, created_at, updated_at`,
+        [provider.id, timeoutMs, retryCount, retryBackoffMs, circuitBreakerEnabled, failureThreshold, cooldownSeconds, fallbackProviderKey, queueOnFailure]
+      );
+      if (!saved) {
+        throw new Error("integration_resilience_policy_update_failed");
+      }
+
+      await writeIntegrationEvent(
+        client,
+        input,
+        "integration_resilience_policy_updated",
+        { key, timeoutMs, retryCount, retryBackoffMs, circuitBreakerEnabled, failureThreshold, cooldownSeconds, fallbackProviderKey, queueOnFailure },
+        { providerId: provider.id }
+      );
+      return json(200, { status: "ok", policy: serializeProviderResiliencePolicy(saved) });
+    });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "integrations.providers.resilience_policy" });
+    }
+    throw error;
+  }
+}
+
+async function handleIntegrationProviderEvents(input: OperationalRouteInput, key: string) {
+  const denied = await requireSuperAdmin(input);
+  if (denied) {
+    return denied;
+  }
+
+  try {
+    const provider = await findIntegrationProvider(input.db, key);
+    if (!provider) {
+      return json(404, { status: "integration_provider_not_found", key });
+    }
+    const events = await input.db.query<PlatformIntegrationEventRow>(
+      `SELECT id, provider_id, credential_id, tenant_id, event_type, actor_principal_id, payload, created_at
+       FROM platform_integration_events
+       WHERE provider_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [provider.id]
+    );
+    return json(200, { status: "ok", provider: serializeIntegrationProvider(provider), events });
+  } catch (error) {
+    if (isRuntimeStoreUnavailable(error)) {
+      return json(503, { status: "runtime_store_unavailable", operation: "integrations.providers.events" });
+    }
+    throw error;
+  }
+}
+
+async function handleIntegrationRoute(input: OperationalRouteInput) {
+  const parsed = parseIntegrationPath(input.pathname);
+  if (!parsed) {
+    return json(404, { status: "integration_route_not_found", path: input.pathname });
+  }
+
+  if (parsed.resource === "providers" && parsed.collection) {
+    return input.method === "GET"
+      ? handleIntegrationProviderList(input)
+      : json(405, { status: "method_not_allowed", allowedMethods: ["GET"] });
+  }
+  if (parsed.resource === "credentials" && parsed.collection) {
+    return input.method === "GET"
+      ? handleIntegrationCredentialList(input)
+      : json(405, { status: "method_not_allowed", allowedMethods: ["GET"] });
+  }
+  if (parsed.resource === "providers" && !parsed.collection) {
+    if (!parsed.action && input.method === "GET") {
+      return handleIntegrationProviderDetail(input, parsed.key);
+    }
+    if (parsed.action === "credentials" && input.method === "POST" && parsed.extra.length === 0) {
+      return handleIntegrationCredentialCreate(input, parsed.key);
+    }
+    if (parsed.action === "health" && input.method === "GET" && parsed.extra.length === 0) {
+      return handleIntegrationProviderHealth(input, parsed.key);
+    }
+    if (parsed.action === "resilience-policy" && input.method === "PATCH" && parsed.extra.length === 0) {
+      return handleIntegrationProviderResiliencePolicyUpdate(input, parsed.key);
+    }
+    if (parsed.action === "events" && input.method === "GET" && parsed.extra.length === 0) {
+      return handleIntegrationProviderEvents(input, parsed.key);
+    }
+  }
+  if (parsed.resource === "credentials" && !parsed.collection) {
+    if (!parsed.action && input.method === "PATCH") {
+      return handleIntegrationCredentialUpdate(input, parsed.id);
+    }
+    if (!parsed.action && input.method === "DELETE") {
+      return handleIntegrationCredentialDelete(input, parsed.id);
+    }
+    if (parsed.action === "test" && input.method === "POST" && parsed.extra.length === 0) {
+      return handleIntegrationCredentialTest(input, parsed.id);
+    }
+  }
+
+  return json(404, { status: "integration_route_not_found", path: input.pathname });
+}
+
 async function findTheme(db: RuntimeDatabase | RuntimeDatabaseClient, key: string) {
   return db.one<PlatformThemeRow>(
     `SELECT id, key, name, description, industry, category, status, version, is_core, is_premium,
@@ -2955,6 +3851,7 @@ export function isOperationalRuntimeRoute(pathname: string) {
     pathname.startsWith("/v1/modules/") ||
     pathname === "/v1/plugins" ||
     pathname.startsWith("/v1/plugins/") ||
+    pathname.startsWith("/v1/integrations/") ||
     pathname === "/v1/themes" ||
     pathname.startsWith("/v1/themes/") ||
     pathname === "/v1/tenants" ||
@@ -2981,6 +3878,10 @@ export async function handleOperationalRoute(input: OperationalRouteInput): Prom
 
   if (input.pathname === "/v1/plugins" || input.pathname.startsWith("/v1/plugins/")) {
     return handlePluginRoute(input);
+  }
+
+  if (input.pathname.startsWith("/v1/integrations/")) {
+    return handleIntegrationRoute(input);
   }
 
   if (input.pathname === "/v1/themes" || input.pathname.startsWith("/v1/themes/")) {
