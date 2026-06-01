@@ -1,9 +1,16 @@
+import { searchableBlueprintLinks, type BlueprintStatus } from "@/config/panel-blueprint";
+
 export type ManagementTone = "ready" | "waiting" | "setup" | "planned" | "attention";
 
 export interface ManagementLink {
   readonly label: string;
   readonly href: string;
   readonly description: string;
+  readonly panelLabel?: string | undefined;
+  readonly status?: BlueprintStatus | undefined;
+  readonly provider?: string | undefined;
+  readonly permission?: string | undefined;
+  readonly searchText?: string | undefined;
 }
 
 export interface ManagementFormField {
@@ -40,6 +47,7 @@ export interface ManagementArea {
 
 export const primarySidebarItems: readonly ManagementLink[] = [
   { label: "Ana Panel", href: "/", description: "Günlük yönetim özeti" },
+  { label: "Blueprint", href: "/blueprints", description: "PDF kapsam ve panel haritası" },
   { label: "Tenantlar", href: "/tenants", description: "Kiracı ve workspace yönetimi" },
   { label: "Satıcılar", href: "/marketplace/sellers", description: "Başvuru, KYC ve komisyon" },
   { label: "Ürünler", href: "/catalog/products", description: "Katalog ve ürün onayı" },
@@ -59,6 +67,7 @@ export const primarySidebarItems: readonly ManagementLink[] = [
 
 export const quickActions: readonly ManagementLink[] = [
   { label: "Yeni Tenant Oluştur", href: "/tenants/new", description: "İlk gerçek tenant provisioning akışını başlat" },
+  { label: "PDF Blueprint Merkezi", href: "/blueprints", description: "15 panel ve normalize Commerce OS kapsamını incele" },
   { label: "Satıcı Başvurularını İncele", href: "/marketplace/applications", description: "Bekleyen başvuru ve KYC akışlarını aç" },
   { label: "Ürünleri Yönet", href: "/catalog/products", description: "Ürün, kategori ve import hazırlıklarını yönet" },
   { label: "Siparişleri Gör", href: "/orders", description: "Tüm sipariş operasyon alanına git" },
@@ -266,21 +275,21 @@ export const managementAreas: readonly ManagementArea[] = [
   },
   {
     id: "odoo",
-    title: "ERP / Odoo",
-    description: "Odoo health, modüller, muhasebe, stok, depo, satın alma, CRM, HR, mapping ve sync işlerini yönetin.",
+    title: "ERP Provider / Odoo Engine",
+    description: "Odoo health sinyalini ve planlanan muhasebe, stok, depo, satın alma, CRM, HR, mapping ve sync bağlantılarını izleyin.",
     href: "/erp/odoo",
-    statusLabel: "Odoo hazır",
-    statusTone: "ready",
+    statusLabel: "Provider bağlantısı kısmen hazır",
+    statusTone: "setup",
     engineService: "odoo",
-    engineLabel: "Odoo ERP",
+    engineLabel: "Odoo ERP Provider",
     primaryAction: { label: "Odoo Merkezi", href: "/erp/odoo", description: "ERP yönetim merkezini aç" },
     secondaryActions: [
       { label: "Mapping Studio", href: "/erp/mapping-studio", description: "Alan eşleştirme" },
       { label: "Sync Jobs", href: "/erp/sync-jobs", description: "Senkronizasyon işleri" },
       { label: "Çakışmalar", href: "/erp/conflicts", description: "Veri çakışmaları" }
     ],
-    emptyState: "Odoo bağlantısı hazır. Muhasebe ve stok mapping adımları bekliyor.",
-    nextStep: "Önce şirket ve muhasebe mapping hazırlığını tamamlayın, sonra sync işlerini açın.",
+    emptyState: "Odoo container sağlık sinyali veriyor. ERP adaptörü, mapping ve worker akışları henüz bağlı değil.",
+    nextStep: "Önce auth adaptörü ile şirket ve muhasebe mapping hazırlığını tamamlayın; ardından kontrollü sync işlerini açın.",
     operations: [
       { label: "Odoo Health", href: "/erp/odoo", description: "Servis durumu" },
       { label: "Modüller", href: "/erp/modules", description: "Odoo modül kataloğu" },
@@ -561,22 +570,25 @@ export const managementAreas: readonly ManagementArea[] = [
 export const searchableManagementLinks: readonly ManagementLink[] = [
   ...primarySidebarItems,
   ...quickActions,
-  ...managementAreas.flatMap((area) => [area.primaryAction, ...area.secondaryActions, ...area.operations])
+  ...managementAreas.flatMap((area) => [area.primaryAction, ...area.secondaryActions, ...area.operations]),
+  ...searchableBlueprintLinks
 ].filter((item, index, list) => list.findIndex((candidate) => candidate.href === item.href && candidate.label === item.label) === index);
 
-const pagePresetEntries = managementAreas.flatMap((area) => [
-  [area.href, area] as const,
-  ...area.secondaryActions.map((action) => [action.href, area] as const),
-  ...area.operations.map((operation) => [operation.href, area] as const)
-]);
+export const managementAreaHrefConflicts = managementAreas
+  .filter((area, index, list) => list.findIndex((candidate) => candidate.href === area.href) !== index)
+  .map((area) => area.href);
 
-export const managementPagePresets = new Map<string, ManagementArea>();
-for (const [href, area] of pagePresetEntries) {
-  if (!managementPagePresets.has(href)) {
-    managementPagePresets.set(href, area);
-  }
+if (managementAreaHrefConflicts.length) {
+  throw new Error(`Duplicate management area href: ${managementAreaHrefConflicts.join(", ")}`);
 }
 
+export const managementPagePresets = new Map<string, ManagementArea>(managementAreas.map((area) => [area.href, area]));
+
 export function getManagementAreaByHref(href: string) {
-  return managementPagePresets.get(href) ?? managementAreas.find((area) => href === area.href || href.startsWith(`${area.href}/`));
+  return (
+    managementPagePresets.get(href) ??
+    [...managementAreas]
+      .sort((left, right) => right.href.length - left.href.length)
+      .find((area) => href.startsWith(`${area.href}/`))
+  );
 }

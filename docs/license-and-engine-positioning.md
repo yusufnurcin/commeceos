@@ -6,7 +6,7 @@ Bu belge teknik envanterdir; hukuki görüş veya kesin ticari kullanım garanti
 
 - **Commerce OS Core** kendi tenant, satıcı, katalog ve sipariş tablolarıyla ana sistemdir.
 - **Medusa** zorunlu ana motor değildir. Opsiyonel commerce provider / bridge olarak catalog ve order sync job kuyruklarına bağlanır.
-- **Odoo** dahili ERP motorudur. Ham Odoo UI platform ürünü değildir. Muhasebe, stok, fatura ve satın alma akışları kontrollü bridge, mapping ve worker katmanlarıyla açılmalıdır.
+- **Odoo** opsiyonel ERP provider / bridge motorudur. Ham Odoo UI platform ürünü değildir. Container ve TCP health sinyali gerçektir; muhasebe, stok, fatura ve satın alma akışları auth adaptörü, kontrollü bridge, mapping ve worker katmanlarıyla açılmalıdır.
 - **Integration Vault** dış servis credential kayıtlarını ve provider dayanıklılık politikalarını merkezileştirir.
 
 ## Ana Altyapılar
@@ -20,7 +20,7 @@ Bu belge teknik envanterdir; hukuki görüş veya kesin ticari kullanım garanti
 | Redis | `redis:7.4-alpine` | RSALv2 veya SSPLv1 | Kullanım senaryosu seçilen lisans koşuluna göre incelenmelidir. | Redis 7.4 BSD değildir. SaaS ve managed-service modeli için hukuk incelemesi gerekir. | Cache, queue ve event bus altyapısı |
 | Meilisearch | `getmeili/meilisearch:v1.13` | MIT | Arama motoru ticari üründe kullanılabilir. | Cloud hizmeti seçilirse hizmet sözleşmesi ayrıca incelenmeli. | Arama indexi |
 | MinIO | `RELEASE.2025-04-22T22-12-26Z` | GNU AGPLv3 | Self-host kullanım mümkündür. | Ağ üzerinden sunulan değiştirilmiş dağıtım ve türev çalışma yükümlülükleri hukuk incelemesi ister. | Object storage |
-| Odoo Community | `odoo:18.0` | LGPLv3 | Community motor dahili ERP katmanında kullanılabilir. | Community ve Enterprise addon sınırı korunmalıdır. | ERP motoru |
+| Odoo Community | `odoo:18.0` | LGPLv3 | Community motor opsiyonel ERP provider katmanında kullanılabilir. | Community ve Enterprise addon sınırı korunmalıdır. Container health, ERP mapping ve worker hazır anlamına gelmez. | Opsiyonel ERP provider / bridge |
 | Odoo Enterprise addonları | Mount noktası mevcut, lisanslı addon doğrulanmadı | Odoo Enterprise Edition License | Geçerli abonelik ve doğru kullanıcı sayısı gerekir. | `account_accountant` Community kurulumunda görünmüyor. Enterprise addonlarını sahte kurulu göstermeyin. | İleri muhasebe fonksiyonları |
 | Medusa | `2.12.2` | MIT | Opsiyonel provider olarak kullanılabilir. | Core tablolar Medusa'ya bağımlı tasarlanmamalı; sync worker ayrı doğrulanmalı. | Opsiyonel commerce bridge provider |
 | Tailwind CSS | `3.4.x` | MIT | UI stillendirme katmanında kullanılabilir. | Eklenti paketleri ayrıca kontrol edilmeli. | UI stil katmanı |
@@ -57,4 +57,3 @@ pnpm licenses list --json
 - [Lucide license](https://github.com/lucide-icons/lucide/blob/main/LICENSE)
 - [pnpm repository](https://github.com/pnpm/pnpm)
 - [Turborepo repository](https://github.com/vercel/turborepo)
-

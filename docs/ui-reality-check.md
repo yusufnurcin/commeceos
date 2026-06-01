@@ -55,3 +55,10 @@ Metinler Medusa'yı ana commerce motoru gibi anlatıyordu. Commerce OS Core art�
 
 macOS benzeri Workspace OS görsel fazına; finans, shipping, iletişim ve ERP mapping gibi temel iş akışlarının gerçek DB/API kontratları netleştikten sonra geçilmelidir. Önce davranış, sonra görsel sistem.
 
+## PDF kapsamı arayüzde nasıl görünür tutuluyor?
+
+`/blueprints` ekranı PDF içindeki `15 panel`, `211 menü grubu`, `1834 menü öğesi` ve `2910 permission` hedefini görünür tutar. Bu ekran 1834 öğeyi sidebar'a yığmaz. Normalize ana kapasiteleri panel, durum, provider ve permission alanlarına göre aranabilir kartlar halinde gösterir. Çalışmayan alanlar `Planlandı`, `Provider gerekli` veya `Entegrasyon gerekli` olarak etiketlenir.
+
+## Mobil shell düzeltmesi
+
+Central Admin sidebar mobil ve dar tablet görünümünde artık içeriğin üstüne uzun bir blok olarak yerleşmez. Üst bardaki menü butonu ile açılan drawer olarak çalışır. Bu davranış PDF kapsamı büyürken ana içeriğin okunabilir kalmasını sağlar.

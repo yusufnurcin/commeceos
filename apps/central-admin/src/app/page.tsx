@@ -73,7 +73,7 @@ export default async function CentralAdminDashboardPage() {
         <div className="service-status-grid">
           <ServiceStatusCard {...service(entries, "gateway-api", "Gateway", "Ana API omurgası yanıt veriyor.")} />
           <ServiceStatusCard {...service(entries, "medusa", "Medusa Bridge Provider", "Opsiyonel commerce provider / bridge.")} />
-          <ServiceStatusCard {...service(entries, "odoo", "Odoo ERP Engine", "ERP motoru sağlık sinyali.")} />
+          <ServiceStatusCard {...service(entries, "odoo", "ERP Provider / Odoo Engine", "Opsiyonel ERP provider sağlık sinyali. Adaptör ve worker durumu ERP merkezinde ayrılır.")} />
           <ServiceStatusCard label="Demo Mode" status={payload.demo?.demoModeEnabled ? "Açık" : "Kapalı"} detail="Demo verisi üretim kayıtlarından açıkça ayrılır." tone={payload.demo?.demoModeEnabled ? "ready" : "waiting"} />
         </div>
       </section>

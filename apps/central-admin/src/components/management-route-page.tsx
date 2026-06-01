@@ -9,6 +9,7 @@ import {
   ServiceStatusCard,
   StarterFormCard
 } from "@/components/admin";
+import { BlueprintCenterPanel } from "@/components/blueprint-center-panel";
 import { navigationManifest, type NavigationItem } from "@/config/navigation";
 import { getManagementAreaByHref, type ManagementArea } from "@/config/management";
 import { getDashboardRuntime } from "@/lib/runtime-data";
@@ -77,6 +78,15 @@ export async function ManagementRoutePage({ item }: { readonly item: NavigationI
   }
 
   const principal = payload.me.principal;
+  if (item.href === "/blueprints") {
+    return (
+      <AdminShell navigation={navigationManifest} principal={principal}>
+        <PageHeader item={item} principal={principal} />
+        <BlueprintCenterPanel />
+      </AdminShell>
+    );
+  }
+
   const area = getManagementAreaByHref(item.href) ?? fallbackArea(item);
   const healthEntries = payload.healthMatrix?.entries ?? [];
   const engineStatus = serviceDetail(area, healthEntries);

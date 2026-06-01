@@ -119,8 +119,8 @@ function emptyState(label: string, status: NavigationStatus, engine?: string): O
   }
   if (status === "requires-medusa") {
     return {
-      title: "Medusa API hazır, commerce sync bekliyor",
-      description: "Medusa admin açılmaz. Catalog, pricing, cart, checkout ve order köprüleri Gateway üzerinden yönetilecek."
+      title: "Medusa opsiyonel provider bağlantısı bekliyor",
+      description: "Commerce OS Core bağımsız çalışır. Medusa admin açılmaz; catalog ve order sync yalnız kontrollü provider kuyruğu üzerinden yönetilir."
     };
   }
   if (status === "requires-integration") {
@@ -241,6 +241,19 @@ const workspaceSeeds: readonly WorkspaceSeed[] = [
       { segment: "settings", label: "Global Ayarlar", description: "Dil, para birimi, saat dilimi, bakım modu ve platform politikaları.", status: "planned", permission: "platform.settings.manage" },
       { segment: "notifications", label: "Sistem Bildirimleri", description: "Sistem, 2FA, sipariş ve pazarlama bildirim şablonları.", status: "requires-integration", engine: "gateway", permission: "platform.notifications.manage", moduleKey: "notifications" }
     ]
+  },
+  {
+    id: "blueprints",
+    label: "PDF Blueprint Merkezi",
+    description: "15 panel, 211 menü grubu, 1834 menü öğesi ve 2910 permission hedefini görünür tutar.",
+    href: "/blueprints",
+    icon: "map",
+    group: "Platform",
+    moduleKey: "platform_blueprint",
+    permissionPrefix: "platform.blueprints",
+    status: "active",
+    refs: ["PDF: Panel blueprint katmanı", "PDF: Permission ve Endpoint Kırılımı", "Sohbet: FAZ 13"],
+    items: []
   },
   {
     id: "tenant-control",

@@ -14,7 +14,7 @@ export default async function OdooCenterPage() {
   const item = findNavigationItemByHref("/erp/odoo") ?? navigationManifest[0]!;
   return (
     <AdminShell navigation={navigationManifest} principal={session.principal}>
-      <PageHeader item={{ ...item, label: "ERP / Odoo Merkezi", description: "Odoo ERP motorunun ölçülen sağlık seviyesini, hazır sınırlarını ve henüz bağlanmamış ERP Center parçalarını dürüstçe izleyin.", status: "runtime-ready" }} principal={session.principal} />
+      <PageHeader item={{ ...item, label: "ERP Provider / Odoo Engine", description: "Opsiyonel Odoo provider sağlık seviyesini, hazır sınırlarını ve henüz bağlanmamış ERP Center parçalarını dürüstçe izleyin.", status: "runtime-ready" }} principal={session.principal} />
       <OdooEngineCenter payload={payload} />
     </AdminShell>
   );

@@ -35,8 +35,8 @@ export function OdooEngineCenter({ payload }: { readonly payload: OdooEngineStat
       <section className="engine-position-card">
         <header>
           <div>
-            <h2>Odoo ERP Engine</h2>
-            <p>Odoo ham yönetim paneli değildir. Commerce OS içinde muhasebe, stok, fatura ve satın alma için kontrollü ERP motoru olarak konumlanır.</p>
+            <h2>ERP Provider / Odoo Engine</h2>
+            <p>Odoo ham yönetim paneli değildir. Commerce OS içinde muhasebe, stok, fatura ve satın alma için opsiyonel ve kontrollü ERP provider olarak konumlanır.</p>
           </div>
           <mark data-state={payload.health?.status === "ok" ? "ok" : "waiting"}>{payload.health?.status === "ok" ? "Sağlık sinyali hazır" : "Kısıtlı mod"}</mark>
         </header>

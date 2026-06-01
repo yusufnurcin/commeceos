@@ -12,7 +12,7 @@ Commerce OS v2 artık kendi tenant, seller, catalog ve order tablolarına sahipt
 
 - Commerce OS Core ana sistemdir.
 - Medusa zorunlu ana motor değildir; opsiyonel commerce provider / bridge olarak kalır.
-- Odoo ERP, muhasebe, stok ve fatura motoru olarak kalır.
+- Odoo ERP, muhasebe, stok ve fatura için opsiyonel provider / bridge motoru olarak kalır.
 - Integration Vault dış servis provider ve credential yönetimini merkezileştirir.
 - Laravel'e şu anda geçiş yapılmaz. Domain core kendi DB ve API sözleşmeleriyle bağımsız tutulur.
 
@@ -21,6 +21,7 @@ Commerce OS v2 artık kendi tenant, seller, catalog ve order tablolarına sahipt
 - Catalog ve order CRUD akışları Medusa kapalıyken çalışmaya devam eder.
 - Medusa kapalıysa yalnız sync queue kontrollü `503 medusa_unavailable` veya kısıtlı mod mesajı verir.
 - Odoo raw UI son kullanıcı deneyimi değildir.
+- Odoo container ve TCP health sinyali, auth adaptörü, mapping veya worker akışlarının hazır olduğu anlamına gelmez.
 - ERP mapping, worker ve conflict resolver ayrı fazlarda bağlanmalıdır.
 - Provider değişimleri Commerce OS Core domain tablolarını değiştirmez.
 
@@ -48,4 +49,3 @@ Seçildi. Domain kayıtları Commerce OS Core'da tutulur; Medusa ve diğer provi
 - Doğrudan provider yazımı worker doğrulanmadan başarılı gösterilmez.
 - Idempotency anahtarları ve audit olayları korunur.
 - Provider kapalıyken core mutation yolları açık kalır.
-

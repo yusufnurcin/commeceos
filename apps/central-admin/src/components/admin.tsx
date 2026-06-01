@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { NavigationItem, NavigationStatus } from "@/config/navigation";
 import {
   primarySidebarItems,
@@ -414,7 +414,7 @@ export function NavigationSearch({ items }: { readonly items: readonly Managemen
       return [];
     }
     return items
-      .filter((item) => `${item.label} ${item.description}`.toLocaleLowerCase("tr-TR").includes(normalized))
+      .filter((item) => `${item.label} ${item.description} ${item.panelLabel ?? ""} ${item.provider ?? ""} ${item.permission ?? ""} ${item.searchText ?? ""} ${item.href}`.toLocaleLowerCase("tr-TR").includes(normalized))
       .slice(0, 12);
   }, [items, query]);
 
@@ -427,6 +427,9 @@ export function NavigationSearch({ items }: { readonly items: readonly Managemen
             <Link href={item.href} key={`${item.href}-${item.label}`}>
               <strong>{item.label}</strong>
               <span>{item.description}</span>
+              {item.status || item.provider || item.panelLabel ? (
+                <small>{[item.panelLabel, item.status?.replace(/_/g, " "), item.provider].filter(Boolean).join(" · ")}</small>
+              ) : null}
             </Link>
           ))}
         </div>
@@ -488,7 +491,7 @@ export function CommandPalette({ items }: { readonly items: readonly ManagementL
   const matches = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("tr-TR");
     return (normalized
-      ? items.filter((item) => `${item.label} ${item.description}`.toLocaleLowerCase("tr-TR").includes(normalized))
+      ? items.filter((item) => `${item.label} ${item.description} ${item.panelLabel ?? ""} ${item.provider ?? ""} ${item.permission ?? ""} ${item.searchText ?? ""} ${item.href}`.toLocaleLowerCase("tr-TR").includes(normalized))
       : items.slice(0, 10)
     ).slice(0, 20);
   }, [items, query]);
@@ -506,6 +509,9 @@ export function CommandPalette({ items }: { readonly items: readonly ManagementL
               <Link href={item.href} key={`${item.href}-${item.label}`} onClick={() => setOpen(false)}>
                 <strong>{item.label}</strong>
                 <span>{item.description}</span>
+                {item.status || item.provider || item.panelLabel ? (
+                  <small>{[item.panelLabel, item.status?.replace(/_/g, " "), item.provider].filter(Boolean).join(" · ")}</small>
+                ) : null}
               </Link>
             ))}
           </div>
@@ -516,14 +522,21 @@ export function CommandPalette({ items }: { readonly items: readonly ManagementL
 }
 
 export function AdminSidebar({
-  currentPath
+  currentPath,
+  open,
+  onClose
 }: {
   readonly currentPath: string;
+  readonly open: boolean;
+  readonly onClose: () => void;
 }) {
   const visibleItems = primarySidebarItems;
 
   return (
-    <aside className="admin-sidebar">
+    <aside className="admin-sidebar" data-open={open ? "true" : "false"}>
+      <button className="sidebar-close" type="button" aria-label="Menüyü kapat" onClick={onClose}>
+        ×
+      </button>
       <Link className="admin-brand" href="/">
         <span className="admin-brand-mark">ZC</span>
         <div>
@@ -537,7 +550,7 @@ export function AdminSidebar({
         {visibleItems.map((item) => {
           const active = currentPath === item.href || (item.href !== "/" && currentPath.startsWith(`${item.href}/`));
           return (
-            <Link className="workspace-link" data-active={active ? "true" : "false"} href={item.href} key={`${item.href}-${item.label}`}>
+            <Link className="workspace-link" data-active={active ? "true" : "false"} href={item.href} key={`${item.href}-${item.label}`} onClick={onClose}>
               <span className="workspace-icon">{item.label.slice(0, 2).toLocaleUpperCase("tr-TR")}</span>
               <div>
                 <strong>{item.label}</strong>
@@ -553,13 +566,18 @@ export function AdminSidebar({
 
 export function AdminTopbar({
   principal,
-  onLogout
+  onLogout,
+  onMenuToggle
 }: {
   readonly principal?: PrincipalView | undefined;
   readonly onLogout?: () => void;
+  readonly onMenuToggle: () => void;
 }) {
   return (
     <header className="admin-topbar">
+      <button className="mobile-menu-button" type="button" aria-label="Yönetim menüsünü aç" onClick={onMenuToggle}>
+        ☰
+      </button>
       <WorkspaceSwitcher workspaces={primarySidebarItems} />
       <CommandPalette items={searchableManagementLinks} />
       <div className="principal-chip">
@@ -586,6 +604,11 @@ export function AdminShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -596,9 +619,10 @@ export function AdminShell({
 
   return (
     <main className="admin-shell">
-      <AdminSidebar currentPath={pathname} />
+      <AdminSidebar currentPath={pathname} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      {sidebarOpen ? <button className="sidebar-scrim" type="button" aria-label="Menüyü kapat" onClick={() => setSidebarOpen(false)} /> : null}
       <section className="admin-main">
-        <AdminTopbar principal={principal} onLogout={logout} />
+        <AdminTopbar principal={principal} onLogout={logout} onMenuToggle={() => setSidebarOpen((open) => !open)} />
         <div className="admin-content">{children}</div>
       </section>
     </main>
